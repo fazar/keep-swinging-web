@@ -8,11 +8,32 @@
   </head>
   <body>
     <header class="top">
-      <h1>Keep Swinging</h1>
-      <p class="tag">Doubles · Tennis &amp; Padel</p>
+      <a href="/" class="brand-link" id="brand-home" aria-label="Keep Swinging — home">
+        <h1>Keep Swinging</h1>
+        <p class="tag">Doubles · Tennis &amp; Padel</p>
+      </a>
     </header>
 
-    <main id="view-home" class="panel">
+    <main class="app-main">
+    <div id="view-loading" class="panel hidden" aria-live="polite" aria-busy="false">
+      <div class="loading-card">
+        <img
+          src="/loading.png"
+          alt=""
+          class="loading-icon"
+          width="72"
+          height="72"
+          decoding="async"
+        />
+        <p class="loading-title">Loading session…</p>
+        <p class="loading-hint">
+          If this takes a little while, the server may be waking up. Free hosting sometimes needs
+          about a minute after idle.
+        </p>
+      </div>
+    </div>
+
+    <div id="view-home" class="panel">
       <h2>New session</h2>
       <form id="create-form">
         <label>Sport</label>
@@ -27,20 +48,19 @@
         </button>
         <button type="submit">Start session</button>
       </form>
-      <p>v0.0.2</p>
-    </main>
+    </div>
 
-    <main id="view-session" class="panel hidden">
+    <div id="view-session" class="panel hidden">
       <div class="session-head">
-        <a href="/" class="secondary link">New session</a>
+        <button type="button" class="secondary" id="btn-new-session">New session</button>
         <button type="button" class="secondary" id="copy-link">
           Copy link
         </button>
       </div>
       <p id="session-meta" class="meta"></p>
 
-      <section>
-        <h2>Suggested doubles</h2>
+      <section class="session-block session-block--first">
+        <h2 class="section-heading">Suggested doubles</h2>
         <div id="suggestion" class="card"></div>
         <label class="resting-label"
           >Resting player <span class="optional-tag">(optional)</span></label
@@ -56,8 +76,8 @@
         </div>
       </section>
 
-      <section>
-        <h2>Record match</h2>
+      <section class="session-block">
+        <h2 class="section-heading">Record match</h2>
         <form id="match-form" class="card">
           <p class="hint">Uses current suggestion teams by default.</p>
           <label>Team A score</label>
@@ -68,8 +88,8 @@
         </form>
       </section>
 
-      <section>
-        <h2>Standings</h2>
+      <section class="session-block">
+        <h2 class="section-heading">Standings</h2>
         <p class="hint standings-hint">Pts = 3 per win, 1 per draw.</p>
         <div class="table-wrap">
           <table id="standings">
@@ -88,11 +108,21 @@
         </div>
       </section>
 
-      <section>
-        <h2>History</h2>
+      <section class="session-block">
+        <h2 class="section-heading">History</h2>
         <ul id="history" class="history"></ul>
       </section>
+    </div>
+
     </main>
+
+    <footer class="site-footer">
+      <div class="footer-inner">
+        <span class="version-pill" title="App version">v0.0.3</span>
+        <span class="footer-divider" aria-hidden="true"></span>
+        <span class="footer-tagline">Doubles for tennis &amp; padel</span>
+      </div>
+    </footer>
 
     <p id="toast" class="toast hidden" role="status"></p>
     <script src="/config.js"></script>

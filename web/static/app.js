@@ -143,8 +143,6 @@ function formatHistoryPartners(ids, nameMap) {
 
 async function loadSession(id) {
   const sess = await api(`/api/sessions/${id}`);
-  $('#view-home').classList.add('hidden');
-  $('#view-session').classList.remove('hidden');
   $('#session-meta').textContent = `${String(sess.sport).toUpperCase()} · Session ${id}`;
   renderStandings(sess.players);
   renderSuggestion(sess);
@@ -249,7 +247,9 @@ $('#create-form').addEventListener('submit', async (e) => {
       body: JSON.stringify({ sport, players: names }),
     });
     history.replaceState(null, '', `?id=${encodeURIComponent(sess.id)}`);
+    $('#view-home').classList.add('hidden');
     await loadSession(sess.id);
+    $('#view-session').classList.remove('hidden');
     toast('Session started');
   } catch (err) {
     toast(err.message);
@@ -321,6 +321,19 @@ $('#btn-reshuffle').addEventListener('click', async () => {
   }
 });
 
+function goHome() {
+  window.__session = null;
+  window.__suggestion = null;
+  $('#view-session').classList.add('hidden');
+  $('#view-loading').classList.add('hidden');
+  $('#view-home').classList.remove('hidden');
+  playerRows(6);
+  const path = location.pathname || '/';
+  history.replaceState(null, '', path);
+}
+
+$('#btn-new-session').addEventListener('click', goHome);
+
 $('#copy-link').addEventListener('click', async () => {
   const sess = window.__session;
   if (!sess) return;
@@ -339,11 +352,22 @@ function boot() {
   const params = new URLSearchParams(location.search);
   const id = params.get('id');
   if (id) {
-    loadSession(id).catch((e) => {
-      toast(e.message);
-      $('#view-home').classList.remove('hidden');
-      $('#view-session').classList.add('hidden');
-    });
+    $('#view-home').classList.add('hidden');
+    $('#view-session').classList.add('hidden');
+    $('#view-loading').classList.remove('hidden');
+    $('#view-loading').setAttribute('aria-busy', 'true');
+    loadSession(id)
+      .then(() => {
+        $('#view-loading').classList.add('hidden');
+        $('#view-loading').setAttribute('aria-busy', 'false');
+        $('#view-session').classList.remove('hidden');
+      })
+      .catch((e) => {
+        $('#view-loading').classList.add('hidden');
+        $('#view-loading').setAttribute('aria-busy', 'false');
+        toast(e.message);
+        $('#view-home').classList.remove('hidden');
+      });
   }
 }
 
