@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Keep Swinging</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <h1>Keep Swinging</h1>
+      <p class="tag">Doubles · Tennis &amp; Padel</p>
+    </header>
+
+    <main id="view-home" class="panel">
+      <h2>New session</h2>
+      <form id="create-form">
+        <label>Sport</label>
+        <select name="sport" required>
+          <option value="tennis">Tennis</option>
+          <option value="padel">Padel</option>
+        </select>
+        <label>Players (min 4)</label>
+        <div id="players-inputs"></div>
+        <button type="button" class="secondary" id="add-player">
+          Add player
+        </button>
+        <button type="submit">Start session</button>
+      </form>
+    </main>
+
+    <main id="view-session" class="panel hidden">
+      <div class="session-head">
+        <a href="/" class="secondary link">New session</a>
+        <button type="button" class="secondary" id="copy-link">
+          Copy link
+        </button>
+      </div>
+      <p id="session-meta" class="meta"></p>
+
+      <section>
+        <h2>Suggested doubles</h2>
+        <div id="suggestion" class="card"></div>
+        <label class="resting-label"
+          >Resting player <span class="optional-tag">(optional)</span></label
+        >
+        <input
+          type="text"
+          id="resting-name"
+          autocomplete="off"
+          placeholder="Name — excluded from next lineup"
+        />
+        <div class="row">
+          <button type="button" id="btn-reshuffle">Reshuffle</button>
+        </div>
+      </section>
+
+      <section>
+        <h2>Record match</h2>
+        <form id="match-form" class="card">
+          <p class="hint">Uses current suggestion teams by default.</p>
+          <label>Team A score</label>
+          <input type="number" name="score_a" min="0" step="1" />
+          <label>Team B score</label>
+          <input type="number" name="score_b" min="0" step="1" />
+          <button type="submit">Save match</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>Standings</h2>
+        <p class="hint standings-hint">Pts = 3 per win, 1 per draw.</p>
+        <div class="table-wrap">
+          <table id="standings">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>GP</th>
+                <th>W</th>
+                <th>D</th>
+                <th>L</th>
+                <th>Pts</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section>
+        <h2>History</h2>
+        <ul id="history" class="history"></ul>
+      </section>
+    </main>
+
+    <p id="toast" class="toast hidden" role="status"></p>
+    <script src="/config.js"></script>
+    <script src="/app.js"></script>
+  </body>
+</html>
