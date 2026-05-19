@@ -67,7 +67,7 @@ Implementation: `internal/scheduler/doubles.go`.
 
 ## Deploy notes
 
-Free-friendly steps (Netlify + Render + Upstash for ongoing $0 hobby; Oracle VM optional): **[DEPLOY.md](./DEPLOY.md)**.
+Free-friendly steps (Netlify + Render + Upstash for ongoing $0 hobby; Oracle VM optional): **[DEPLOY.md](./DEPLOY.md)**. Plan to expose Render **only via** Netlify’s `/api` function (secrets, checklist): **[function.md](./function.md)**.
 
 - **UI on Netlify (free):** connect the repo; set `KEEP_SWINGING_API_BASE` to your API URL. Build uses [`scripts/netlify-build.sh`](./scripts/netlify-build.sh) and publishes `web/static/`.
 - **API:** must run on a host that supports Docker or Go (not Netlify). Use `REDIS_TLS=true` with **Upstash** and the other vars from [`.env.example`](./.env.example).

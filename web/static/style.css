@@ -350,7 +350,7 @@ th {
 .loading-card {
   text-align: center;
   padding: 2rem 1rem 1.5rem;
-  background: linear-gradient(165deg, #fff 0%, #f8fafc 100%);
+  /*background: linear-gradient(165deg, #fff 0%, #f8fafc 100%);*/
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   box-shadow: 0 4px 24px rgb(15 23 42 / 6%);

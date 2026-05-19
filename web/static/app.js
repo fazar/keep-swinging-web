@@ -3,14 +3,14 @@ const $ = (sel) => document.querySelector(sel);
 /** Base URL for API (empty = same origin). Set in config.js or by Netlify build. */
 function apiBase() {
   const b =
-    typeof window !== 'undefined' && window.__KEEP_SWINGING_API_BASE__ != null
+    typeof window !== "undefined" && window.__KEEP_SWINGING_API_BASE__ != null
       ? String(window.__KEEP_SWINGING_API_BASE__).trim()
-      : '';
-  return b.replace(/\/$/, '');
+      : "";
+  return b.replace(/\/$/, "");
 }
 
 function apiUrl(path) {
-  const p = path.startsWith('/') ? path : `/${path}`;
+  const p = path.startsWith("/") ? path : `/${path}`;
   const base = apiBase();
   return base ? `${base}${p}` : p;
 }
@@ -26,22 +26,24 @@ function warnIfStaticSiteWithoutApiBase() {
     /\.github\.io$/i.test(h);
   if (!looksLikeStaticHost) return;
   const detail =
-    'Add KEEP_SWINGING_API_BASE (your Render/Fly API URL, no trailing slash) in the host env vars, then redeploy. See DEPLOY.md.';
-  console.warn('[Keep Swinging]', detail);
-  toast('API URL not set — check Netlify env KEEP_SWINGING_API_BASE + redeploy');
+    "Add KEEP_SWINGING_API_BASE (your Render/Fly API URL, no trailing slash) in the host env vars, then redeploy. See DEPLOY.md.";
+  console.warn("[Keep Swinging]", detail);
+  toast(
+    "API URL not set — check Netlify env KEEP_SWINGING_API_BASE + redeploy",
+  );
 }
 
 function toast(msg) {
-  const t = $('#toast');
+  const t = $("#toast");
   t.textContent = msg;
-  t.classList.remove('hidden');
+  t.classList.remove("hidden");
   clearTimeout(toast._tid);
-  toast._tid = setTimeout(() => t.classList.add('hidden'), 2200);
+  toast._tid = setTimeout(() => t.classList.add("hidden"), 2200);
 }
 
 async function api(path, opts = {}) {
   const res = await fetch(apiUrl(path), {
-    headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
     ...opts,
   });
   const text = await res.text();
@@ -59,20 +61,26 @@ async function api(path, opts = {}) {
 }
 
 function playerRows(count) {
-  const wrap = $('#players-inputs');
-  wrap.innerHTML = '';
+  const wrap = $("#players-inputs");
+  wrap.innerHTML = "";
   for (let i = 0; i < count; i += 1) {
-    const inp = document.createElement('input');
-    inp.type = 'text';
+    const inp = document.createElement("input");
+    inp.type = "text";
     inp.placeholder = `Player ${i + 1}`;
-    inp.autocomplete = 'off';
+    inp.autocomplete = "off";
     inp.required = i < 4;
     wrap.appendChild(inp);
   }
 }
 
 function escapeHtml(s) {
-  const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  const map = {
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  };
   return String(s).replace(/[&<>"']/g, (c) => map[c] || c);
 }
 
@@ -84,10 +92,10 @@ function playerPoints(p) {
 }
 
 function clearScoreFields() {
-  const form = document.getElementById('match-form');
+  const form = document.getElementById("match-form");
   if (!form) return;
-  form.elements.score_a.value = '';
-  form.elements.score_b.value = '';
+  form.elements.score_a.value = "";
+  form.elements.score_b.value = "";
 }
 
 function resolveExcludeIdsFromRestingName(players, rawName) {
@@ -96,7 +104,11 @@ function resolveExcludeIdsFromRestingName(players, rawName) {
   const lower = q.toLowerCase();
   const hits = players.filter((p) => p.name.trim().toLowerCase() === lower);
   if (hits.length === 0) return { ids: [], error: `No player named "${q}"` };
-  if (hits.length > 1) return { ids: [], error: `Multiple players named "${q}" — use unique names` };
+  if (hits.length > 1)
+    return {
+      ids: [],
+      error: `Multiple players named "${q}" — use unique names`,
+    };
   return { ids: [hits[0].id], error: null };
 }
 
@@ -107,8 +119,18 @@ function idToNameMap(players) {
 }
 
 const HISTORY_MONTHS = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
 ];
 
 function ordinalDay(n) {
@@ -129,21 +151,21 @@ function formatHistoryWhenPlayed(isoString) {
   const yr = d.getFullYear();
   let hr = d.getHours();
   const min = d.getMinutes();
-  const ap = hr >= 12 ? 'PM' : 'AM';
+  const ap = hr >= 12 ? "PM" : "AM";
   hr %= 12;
   if (hr === 0) hr = 12;
-  const mm = String(min).padStart(2, '0');
+  const mm = String(min).padStart(2, "0");
   return `${dom} ${mon} ${yr} ${hr}:${mm} ${ap}`;
 }
 
 function formatHistoryPartners(ids, nameMap) {
-  return ids.map((id) => escapeHtml(nameMap[id] || id)).join(' & ');
+  return ids.map((id) => escapeHtml(nameMap[id] || id)).join(" & ");
 }
-
 
 async function loadSession(id) {
   const sess = await api(`/api/sessions/${id}`);
-  $('#session-meta').textContent = `${String(sess.sport).toUpperCase()} · Session ${id}`;
+  $("#session-meta").textContent =
+    `${String(sess.sport).toUpperCase()} · Session ${id}`;
   renderStandings(sess.players);
   renderSuggestion(sess);
   renderHistory(sess.matches, sess.players);
@@ -151,8 +173,8 @@ async function loadSession(id) {
 }
 
 function renderStandings(players) {
-  const tb = $('#standings tbody');
-  tb.innerHTML = '';
+  const tb = $("#standings tbody");
+  tb.innerHTML = "";
   const sorted = [...players].sort((a, b) => {
     const pb = playerPoints(b);
     const pa = playerPoints(a);
@@ -164,7 +186,7 @@ function renderStandings(players) {
     return b.games_played - a.games_played;
   });
   for (const p of sorted) {
-    const tr = document.createElement('tr');
+    const tr = document.createElement("tr");
     const d = p.draws ?? 0;
     const pts = playerPoints(p);
     tr.innerHTML = `<td>${escapeHtml(p.name)}<div class="pid">${escapeHtml(p.id)}</div></td><td>${p.games_played}</td><td>${p.wins}</td><td>${d}</td><td>${p.losses}</td><td>${pts}</td>`;
@@ -173,14 +195,15 @@ function renderStandings(players) {
 }
 
 function renderSuggestion(sess) {
-  const el = $('#suggestion');
+  const el = $("#suggestion");
   const sug = sess.suggested;
   if (!sug) {
-    el.textContent = 'No suggestion yet.';
+    el.textContent = "No suggestion yet.";
     window.__suggestion = null;
     return;
   }
-  const teamLine = (players) => players.map((x) => `${escapeHtml(x.name)}`).join(' · ');
+  const teamLine = (players) =>
+    players.map((x) => `${escapeHtml(x.name)}`).join(" · ");
   el.innerHTML = `
     <div class="team-block" data-side="a">
       <div class="team-title">Team A</div>
@@ -195,13 +218,13 @@ function renderSuggestion(sess) {
 }
 
 function renderHistory(matches, players) {
-  const ul = $('#history');
-  ul.innerHTML = '';
+  const ul = $("#history");
+  ul.innerHTML = "";
   const nameMap = idToNameMap(players);
   const rev = [...matches].reverse();
   for (const m of rev) {
-    const li = document.createElement('li');
-    li.className = 'history-item';
+    const li = document.createElement("li");
+    li.className = "history-item";
     const when = formatHistoryWhenPlayed(m.played_at);
     const sideA = formatHistoryPartners(m.team_a_ids, nameMap);
     const sideB = formatHistoryPartners(m.team_b_ids, nameMap);
@@ -223,56 +246,56 @@ function renderHistory(matches, players) {
   }
 }
 
-$('#add-player').addEventListener('click', () => {
-  const wrap = $('#players-inputs');
-  const n = wrap.querySelectorAll('input').length;
+$("#add-player").addEventListener("click", () => {
+  const wrap = $("#players-inputs");
+  const n = wrap.querySelectorAll("input").length;
   if (n >= 16) return;
-  const inp = document.createElement('input');
-  inp.type = 'text';
+  const inp = document.createElement("input");
+  inp.type = "text";
   inp.placeholder = `Player ${n + 1}`;
-  inp.autocomplete = 'off';
+  inp.autocomplete = "off";
   wrap.appendChild(inp);
 });
 
-$('#create-form').addEventListener('submit', async (e) => {
+$("#create-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
-  const sport = fd.get('sport');
-  const names = [...document.querySelectorAll('#players-inputs input')]
+  const sport = fd.get("sport");
+  const names = [...document.querySelectorAll("#players-inputs input")]
     .map((i) => i.value.trim())
     .filter(Boolean);
   try {
-    const sess = await api('/api/sessions', {
-      method: 'POST',
+    const sess = await api("/api/sessions", {
+      method: "POST",
       body: JSON.stringify({ sport, players: names }),
     });
-    history.replaceState(null, '', `?id=${encodeURIComponent(sess.id)}`);
-    $('#view-home').classList.add('hidden');
+    history.replaceState(null, "", `?id=${encodeURIComponent(sess.id)}`);
+    $("#view-home").classList.add("hidden");
     await loadSession(sess.id);
-    $('#view-session').classList.remove('hidden');
-    toast('Session started');
+    $("#view-session").classList.remove("hidden");
+    toast("Session started");
   } catch (err) {
     toast(err.message);
   }
 });
 
-$('#match-form').addEventListener('submit', async (e) => {
+$("#match-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const sess = window.__session;
   const sug = window.__suggestion;
   if (!sess || !sug) {
-    toast('No active suggestion');
+    toast("No active suggestion");
     return;
   }
   const fd = new FormData(e.target);
-  const score_a = Number(fd.get('score_a'));
-  const score_b = Number(fd.get('score_b'));
+  const score_a = Number(fd.get("score_a"));
+  const score_b = Number(fd.get("score_b"));
   if (!Number.isFinite(score_a) || !Number.isFinite(score_b)) {
-    toast('Enter scores for both teams');
+    toast("Enter scores for both teams");
     return;
   }
   if (score_a < 0 || score_b < 0) {
-    toast('Scores must be zero or positive');
+    toast("Scores must be zero or positive");
     return;
   }
   const body = {
@@ -283,7 +306,7 @@ $('#match-form').addEventListener('submit', async (e) => {
   };
   try {
     const updated = await api(`/api/sessions/${sess.id}/matches`, {
-      method: 'POST',
+      method: "POST",
       body: JSON.stringify(body),
     });
     window.__session = updated;
@@ -291,17 +314,20 @@ $('#match-form').addEventListener('submit', async (e) => {
     renderSuggestion(updated);
     renderHistory(updated.matches, updated.players);
     clearScoreFields();
-    toast('Match saved');
+    toast("Match saved");
   } catch (err) {
     toast(err.message);
   }
 });
 
-$('#btn-reshuffle').addEventListener('click', async () => {
+$("#btn-reshuffle").addEventListener("click", async () => {
   const sess = window.__session;
   if (!sess) return;
-  const restingRaw = document.getElementById('resting-name').value;
-  const { ids: excludeIds, error } = resolveExcludeIdsFromRestingName(sess.players, restingRaw);
+  const restingRaw = document.getElementById("resting-name").value;
+  const { ids: excludeIds, error } = resolveExcludeIdsFromRestingName(
+    sess.players,
+    restingRaw,
+  );
   if (error) {
     toast(error);
     return;
@@ -309,13 +335,13 @@ $('#btn-reshuffle').addEventListener('click', async () => {
   const payload = JSON.stringify({ exclude_player_ids: excludeIds });
   try {
     const updated = await api(`/api/sessions/${sess.id}/reshuffle`, {
-      method: 'POST',
+      method: "POST",
       body: payload,
     });
     window.__session = updated;
     renderSuggestion(updated);
     clearScoreFields();
-    toast('Lineup updated');
+    toast("Lineup updated");
   } catch (err) {
     toast(err.message);
   }
@@ -324,23 +350,23 @@ $('#btn-reshuffle').addEventListener('click', async () => {
 function goHome() {
   window.__session = null;
   window.__suggestion = null;
-  $('#view-session').classList.add('hidden');
-  $('#view-loading').classList.add('hidden');
-  $('#view-home').classList.remove('hidden');
+  $("#view-session").classList.add("hidden");
+  $("#view-loading").classList.add("hidden");
+  $("#view-home").classList.remove("hidden");
   playerRows(6);
-  const path = location.pathname || '/';
-  history.replaceState(null, '', path);
+  const path = location.pathname || "/";
+  history.replaceState(null, "", path);
 }
 
-$('#btn-new-session').addEventListener('click', goHome);
+$("#btn-new-session").addEventListener("click", goHome);
 
-$('#copy-link').addEventListener('click', async () => {
+$("#copy-link").addEventListener("click", async () => {
   const sess = window.__session;
   if (!sess) return;
   const url = `${location.origin}${location.pathname}?id=${encodeURIComponent(sess.id)}`;
   try {
     await navigator.clipboard.writeText(url);
-    toast('Link copied');
+    toast("Link copied");
   } catch (_) {
     toast(url);
   }
@@ -350,23 +376,23 @@ function boot() {
   warnIfStaticSiteWithoutApiBase();
   playerRows(6);
   const params = new URLSearchParams(location.search);
-  const id = params.get('id');
+  const id = params.get("id");
   if (id) {
-    $('#view-home').classList.add('hidden');
-    $('#view-session').classList.add('hidden');
-    $('#view-loading').classList.remove('hidden');
-    $('#view-loading').setAttribute('aria-busy', 'true');
+    $("#view-home").classList.add("hidden");
+    $("#view-session").classList.add("hidden");
+    $("#view-loading").classList.remove("hidden");
+    $("#view-loading").setAttribute("aria-busy", "true");
     loadSession(id)
       .then(() => {
-        $('#view-loading').classList.add('hidden');
-        $('#view-loading').setAttribute('aria-busy', 'false');
-        $('#view-session').classList.remove('hidden');
+        $("#view-loading").classList.add("hidden");
+        $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-session").classList.remove("hidden");
       })
       .catch((e) => {
-        $('#view-loading').classList.add('hidden');
-        $('#view-loading').setAttribute('aria-busy', 'false');
+        $("#view-loading").classList.add("hidden");
+        $("#view-loading").setAttribute("aria-busy", "false");
         toast(e.message);
-        $('#view-home').classList.remove('hidden');
+        $("#view-home").classList.remove("hidden");
       });
   }
 }

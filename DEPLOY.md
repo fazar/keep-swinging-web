@@ -25,6 +25,8 @@ This app has two parts:
 
 **Netlify, Vercel, GitHub Pages, and Cloudflare Pages cannot run this Go server or Redis.** They only host the static UI. You deploy the **API somewhere that runs containers or binaries**, then point the static host at that API URL.
 
+**Netlify + lock Render behind a serverless proxy:** see **[function.md](./function.md)** for the plan (shared secret, env checklist, limits of “only Netlify” on free tiers).
+
 **Simplest ongoing $0 setup:** **Upstash Redis** + **Render free web service** (Docker) + **Netlify** for the UI.  
 **Simplest single-URL setup:** **Render** Docker URL only (no Netlify), or **Oracle VM** + Docker Compose.
 
