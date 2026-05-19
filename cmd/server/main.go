@@ -49,7 +49,12 @@ func main() {
 
 	addr := os.Getenv("LISTEN_ADDR")
 	if addr == "" {
-		addr = ":8080"
+		if p := strings.TrimSpace(os.Getenv("PORT")); p != "" {
+			// Render and similar hosts set PORT; bind on all interfaces.
+			addr = "0.0.0.0:" + p
+		} else {
+			addr = ":8080"
+		}
 	}
 	handler := corsMiddleware(loggingMiddleware(log, root))
 	log.Info("listening", "addr", addr)

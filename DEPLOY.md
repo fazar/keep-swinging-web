@@ -43,12 +43,13 @@ This app has two parts:
 ### Step 2 — Deploy the API on Render (Docker)
 
 1. New **Web Service** → connect this repo → **Docker** runtime → instance type **Free**.
-2. Add **environment variables** (Render dashboard → **Environment**):
+2. Add **environment variables** (Render dashboard → **Environment**). Omit `LISTEN_ADDR` unless you know you need it — Render sets **`PORT`** automatically (default **10000**), and this server uses `0.0.0.0:$PORT` when `LISTEN_ADDR` is unset.
    - `REDIS_ADDR` = Upstash host:port
    - `REDIS_PASSWORD` = Upstash password
    - `REDIS_TLS` = `true`
-   - Set `LISTEN_ADDR` to `:$PORT` (Render sets `PORT`; binding to `:$PORT` listens on all interfaces).
 3. Deploy and copy the service URL (e.g. `https://keep-swinging-api.onrender.com`).
+
+Do **not** set `LISTEN_ADDR` to `6379` — that is **Redis’s** port, not HTTP. Do **not** rely on `LISTEN_ADDR=:$PORT` in the dashboard: Render does **not** treat `$PORT` like a shell variable; either leave `LISTEN_ADDR` unset (recommended) or set a full value such as `0.0.0.0:10000` if it matches your service’s **PORT** setting.
 
 **Limits:** Free web apps **spin down after ~15 minutes idle** (~1 minute cold start), and Render caps **750 free instance hours/month** per workspace—enough for one always-running hobby service if it sleeps when idle. Read [Render free docs](https://render.com/docs/free).
 
