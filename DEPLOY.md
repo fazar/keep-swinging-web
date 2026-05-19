@@ -127,6 +127,28 @@ Same as [README](./README.md): Redis + `go run ./cmd/server`, open `http://local
 
 ---
 
+## Troubleshooting
+
+### `POST .../api/sessions` → **404** on `*.netlify.app`
+
+The browser is calling **Netlify** instead of your Go API. Netlify has no `/api` route, so you get 404.
+
+1. In Netlify: **Site configuration → Environment variables** add **`KEEP_SWINGING_API_BASE`** = your API origin only, e.g. `https://keep-swinging-api.onrender.com` (**no** trailing `/`, **no** `/api`).
+2. **Trigger deploy** → **Clear cache and deploy site** (or push a commit). The build must rerun so `scripts/netlify-build.sh` regenerates `config.js`.
+3. Hard-refresh the site; in DevTools → Network, `POST` should go to your Render (etc.) host, not `netlify.app`.
+
+Also confirm the API itself works:
+
+```bash
+curl -sS -X POST https://YOUR-API-HOST/api/sessions \
+  -H 'Content-Type: application/json' \
+  -d '{"sport":"padel","players":["A","B","C","D"]}'
+```
+
+You should get JSON with a `id` field.
+
+---
+
 ## Optional: other static hosts
 
 **Cloudflare Pages** or **GitHub Pages:** publish the `web/static` folder. You must inject the API base manually or with a small CI step (equivalent to `scripts/netlify-build.sh`): produce `config.js` containing:

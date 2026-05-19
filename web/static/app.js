@@ -15,6 +15,22 @@ function apiUrl(path) {
   return base ? `${base}${p}` : p;
 }
 
+/** Netlify/etc. only serve static files; /api must go to the Go backend. */
+function warnIfStaticSiteWithoutApiBase() {
+  if (apiBase()) return;
+  const h = location.hostname;
+  const looksLikeStaticHost =
+    /\.netlify\.app$/i.test(h) ||
+    /\.vercel\.app$/i.test(h) ||
+    /\.pages\.dev$/i.test(h) ||
+    /\.github\.io$/i.test(h);
+  if (!looksLikeStaticHost) return;
+  const detail =
+    'Add KEEP_SWINGING_API_BASE (your Render/Fly API URL, no trailing slash) in the host env vars, then redeploy. See DEPLOY.md.';
+  console.warn('[Keep Swinging]', detail);
+  toast('API URL not set — check Netlify env KEEP_SWINGING_API_BASE + redeploy');
+}
+
 function toast(msg) {
   const t = $('#toast');
   t.textContent = msg;
@@ -318,6 +334,7 @@ $('#copy-link').addEventListener('click', async () => {
 });
 
 function boot() {
+  warnIfStaticSiteWithoutApiBase();
   playerRows(6);
   const params = new URLSearchParams(location.search);
   const id = params.get('id');

@@ -2,3 +2,5 @@
 /tmp/
 .env
 *.exe
+PLAN.md
+DEPLOY.md
