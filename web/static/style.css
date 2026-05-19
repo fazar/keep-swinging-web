@@ -1,11 +1,18 @@
 :root {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    Segoe UI,
+    Roboto,
+    sans-serif;
   color: #0f172a;
   background: #f1f5f9;
   line-height: 1.45;
 }
 
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 body {
   margin: 0 auto;
@@ -36,10 +43,6 @@ main.app-main {
   padding: 0.35rem 0.35rem 0.15rem;
   outline-offset: 2px;
   transition: background 0.15s ease;
-}
-
-.brand-link:hover {
-  background: rgb(15 23 42 / 4%);
 }
 
 .brand-link:focus-visible {
@@ -76,7 +79,9 @@ main.app-main {
   padding: 0.9rem 1rem;
 }
 
-.hidden { display: none !important; }
+.hidden {
+  display: none !important;
+}
 
 label {
   display: block;
@@ -85,7 +90,10 @@ label {
   font-size: 0.9rem;
 }
 
-input, select, textarea, button {
+input,
+select,
+textarea,
+button {
   width: 100%;
   font-size: 1rem;
   padding: 0.65rem 0.75rem;
@@ -112,7 +120,9 @@ button.secondary {
   gap: 0.5rem;
 }
 
-.row button { flex: 1; }
+.row button {
+  flex: 1;
+}
 
 .session-head {
   display: flex;
@@ -120,7 +130,9 @@ button.secondary {
   align-items: center;
 }
 
-.session-head .secondary { margin-top: 0; }
+.session-head .secondary {
+  margin-top: 0;
+}
 
 #view-session .session-block {
   margin: 0;
@@ -163,7 +175,9 @@ button.secondary {
   margin-bottom: 0.75rem;
 }
 
-.team-block:last-child { margin-bottom: 0; }
+.team-block:last-child {
+  margin-bottom: 0;
+}
 
 .team-title {
   font-size: 0.75rem;
@@ -297,7 +311,8 @@ table {
   table-layout: auto;
 }
 
-th, td {
+th,
+td {
   padding: 0.6rem 0.75rem;
   text-align: left;
   border-bottom: 1px solid #e2e8f0;
@@ -367,7 +382,9 @@ th {
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .site-footer {

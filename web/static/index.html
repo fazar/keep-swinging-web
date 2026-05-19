@@ -8,112 +8,121 @@
   </head>
   <body>
     <header class="top">
-      <a href="/" class="brand-link" id="brand-home" aria-label="Keep Swinging — home">
-        <h1>Keep Swinging</h1>
-        <p class="tag">Doubles · Tennis &amp; Padel</p>
-      </a>
+      <h1>
+        <a
+          href="/"
+          class="brand-link"
+          id="brand-home"
+          aria-label="Keep Swinging — home"
+          >Keep Swinging</a
+        >
+      </h1>
+      <p class="tag">Doubles · Tennis &amp; Padel</p>
     </header>
 
     <main class="app-main">
-    <div id="view-loading" class="panel hidden" aria-live="polite" aria-busy="false">
-      <div class="loading-card">
-        <img
-          src="/loading.png"
-          alt=""
-          class="loading-icon"
-          width="72"
-          height="72"
-          decoding="async"
-        />
-        <p class="loading-title">Loading session…</p>
-        <p class="loading-hint">
-          If this takes a little while, the server may be waking up. Free hosting sometimes needs
-          about a minute after idle.
-        </p>
-      </div>
-    </div>
-
-    <div id="view-home" class="panel">
-      <h2>New session</h2>
-      <form id="create-form">
-        <label>Sport</label>
-        <select name="sport" required>
-          <option value="tennis">Tennis</option>
-          <option value="padel">Padel</option>
-        </select>
-        <label>Players (min 4)</label>
-        <div id="players-inputs"></div>
-        <button type="button" class="secondary" id="add-player">
-          Add player
-        </button>
-        <button type="submit">Start session</button>
-      </form>
-    </div>
-
-    <div id="view-session" class="panel hidden">
-      <div class="session-head">
-        <button type="button" class="secondary" id="btn-new-session">New session</button>
-        <button type="button" class="secondary" id="copy-link">
-          Copy link
-        </button>
-      </div>
-      <p id="session-meta" class="meta"></p>
-
-      <section class="session-block session-block--first">
-        <h2 class="section-heading">Suggested doubles</h2>
-        <div id="suggestion" class="card"></div>
-        <label class="resting-label"
-          >Resting player <span class="optional-tag">(optional)</span></label
-        >
-        <input
-          type="text"
-          id="resting-name"
-          autocomplete="off"
-          placeholder="Name — excluded from next lineup"
-        />
-        <div class="row">
-          <button type="button" id="btn-reshuffle">Reshuffle</button>
+      <div
+        id="view-loading"
+        class="panel hidden"
+        aria-live="polite"
+        aria-busy="false"
+      >
+        <div class="loading-card">
+          <img
+            src="/loading.png"
+            alt=""
+            class="loading-icon"
+            width="72"
+            height="72"
+            decoding="async"
+          />
+          <p class="loading-title">Loading session…</p>
+          <p class="loading-hint">Blackbird singing in the dead of night..</p>
         </div>
-      </section>
+      </div>
 
-      <section class="session-block">
-        <h2 class="section-heading">Record match</h2>
-        <form id="match-form" class="card">
-          <p class="hint">Uses current suggestion teams by default.</p>
-          <label>Team A score</label>
-          <input type="number" name="score_a" min="0" step="1" />
-          <label>Team B score</label>
-          <input type="number" name="score_b" min="0" step="1" />
-          <button type="submit">Save match</button>
+      <div id="view-home" class="panel">
+        <h2>New session</h2>
+        <form id="create-form">
+          <label>Sport</label>
+          <select name="sport" required>
+            <option value="tennis">Tennis</option>
+            <option value="padel">Padel</option>
+          </select>
+          <label>Players (min 4)</label>
+          <div id="players-inputs"></div>
+          <button type="button" class="secondary" id="add-player">
+            Add player
+          </button>
+          <button type="submit">Start session</button>
         </form>
-      </section>
+      </div>
 
-      <section class="session-block">
-        <h2 class="section-heading">Standings</h2>
-        <p class="hint standings-hint">Pts = 3 per win, 1 per draw.</p>
-        <div class="table-wrap">
-          <table id="standings">
-            <thead>
-              <tr>
-                <th>Player</th>
-                <th>GP</th>
-                <th>W</th>
-                <th>D</th>
-                <th>L</th>
-                <th>Pts</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
+      <div id="view-session" class="panel hidden">
+        <div class="session-head">
+          <button type="button" class="secondary" id="btn-new-session">
+            New session
+          </button>
+          <button type="button" class="secondary" id="copy-link">
+            Copy link
+          </button>
         </div>
-      </section>
+        <p id="session-meta" class="meta"></p>
 
-      <section class="session-block">
-        <h2 class="section-heading">History</h2>
-        <ul id="history" class="history"></ul>
-      </section>
-    </div>
+        <section class="session-block session-block--first">
+          <h2 class="section-heading">Suggested doubles</h2>
+          <div id="suggestion" class="card"></div>
+          <label class="resting-label"
+            >Resting player <span class="optional-tag">(optional)</span></label
+          >
+          <input
+            type="text"
+            id="resting-name"
+            autocomplete="off"
+            placeholder="Name — excluded from next lineup"
+          />
+          <div class="row">
+            <button type="button" id="btn-reshuffle">Reshuffle</button>
+          </div>
+        </section>
 
+        <section class="session-block">
+          <h2 class="section-heading">Record match</h2>
+          <form id="match-form" class="card">
+            <p class="hint">Uses current suggestion teams by default.</p>
+            <label>Team A score</label>
+            <input type="number" name="score_a" min="0" step="1" />
+            <label>Team B score</label>
+            <input type="number" name="score_b" min="0" step="1" />
+            <button type="submit">Save match</button>
+          </form>
+        </section>
+
+        <section class="session-block">
+          <h2 class="section-heading">Standings</h2>
+          <p class="hint standings-hint">Pts = 3 per win, 1 per draw.</p>
+          <div class="table-wrap">
+            <table id="standings">
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>GP</th>
+                  <th>W</th>
+                  <th>D</th>
+                  <th>L</th>
+                  <th>Pts</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="session-block">
+          <h2 class="section-heading">History</h2>
+          <ul id="history" class="history"></ul>
+        </section>
+      </div>
     </main>
 
     <footer class="site-footer">
