@@ -43,7 +43,8 @@ Environment variables (see `.env.example`):
 | `REDIS_PASSWORD` | Optional auth |
 | `REDIS_DB` | Database number (default `0`) |
 | `SESSION_TTL_DAYS` | TTL for session JSON in Redis (default `30`) |
-| `LISTEN_ADDR` | Bind address (default `:8080`) |
+| `LISTEN_ADDR` | Bind address (default `:8080`; on Render, `PORT` is used if `LISTEN_ADDR` unset) |
+| `CORS_ALLOWED_ORIGINS` | Optional comma-separated browser origins (e.g. your Netlify URL). Empty = `*` |
 
 ## API
 

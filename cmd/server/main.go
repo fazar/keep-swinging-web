@@ -22,6 +22,10 @@ func main() {
 		log.Error("redis config", "err", err)
 		os.Exit(1)
 	}
+	corsAllow := loadCORSAllowList()
+	if len(corsAllow) > 0 {
+		log.Info("cors", "allowed_origins", corsAllow)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := store.Ping(ctx); err != nil {
@@ -56,7 +60,7 @@ func main() {
 			addr = ":8080"
 		}
 	}
-	handler := corsMiddleware(loggingMiddleware(log, root))
+	handler := corsMiddleware(corsAllow, loggingMiddleware(log, root))
 	log.Info("listening", "addr", addr)
 	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Error("server", "err", err)
@@ -64,9 +68,54 @@ func main() {
 	}
 }
 
-func corsMiddleware(next http.Handler) http.Handler {
+// loadCORSAllowList parses CORS_ALLOWED_ORIGINS (comma-separated). Empty means allow any origin (*).
+// Example: https://keep-swinging.netlify.app,http://localhost:3000
+func loadCORSAllowList() []string {
+	raw := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if raw == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		o := strings.TrimSpace(part)
+		if o == "" {
+			continue
+		}
+		o = strings.TrimSuffix(o, "/")
+		out = append(out, o)
+	}
+	return out
+}
+
+func corsAllowed(allow []string, origin string) bool {
+	for _, a := range allow {
+		if origin == a {
+			return true
+		}
+	}
+	return false
+}
+
+func corsMiddleware(allow []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
+		origin := r.Header.Get("Origin")
+
+		if len(allow) == 0 {
+			w.Header().Set("Access-Control-Allow-Origin", "*")
+		} else if origin != "" {
+			if !corsAllowed(allow, origin) {
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
+				http.Error(w, "origin not allowed", http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Add("Vary", "Origin")
+		}
+		// No Origin header (e.g. curl, same-origin server): proceed without ACAO.
+
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {

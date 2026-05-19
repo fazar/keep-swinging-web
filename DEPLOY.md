@@ -47,6 +47,7 @@ This app has two parts:
    - `REDIS_ADDR` = Upstash host:port
    - `REDIS_PASSWORD` = Upstash password
    - `REDIS_TLS` = `true`
+   - `CORS_ALLOWED_ORIGINS` = `https://keep-swinging.netlify.app` (no trailing slash; add `http://localhost:3000` etc. only if you need local split-UI testing against Render)
 3. Deploy and copy the service URL (e.g. `https://keep-swinging-api.onrender.com`).
 
 Do **not** set `LISTEN_ADDR` to `6379` — that is **Redis’s** port, not HTTP. Do **not** rely on `LISTEN_ADDR=:$PORT` in the dashboard: Render does **not** treat `$PORT` like a shell variable; either leave `LISTEN_ADDR` unset (recommended) or set a full value such as `0.0.0.0:10000` if it matches your service’s **PORT** setting.
@@ -96,12 +97,15 @@ Good ongoing $0 options for “one URL”:
 | `REDIS_DB` | `0` | Redis DB index |
 | `SESSION_TTL_DAYS` | `30` | Session TTL in Redis (days) |
 | `LISTEN_ADDR` | `:8080` | HTTP bind (use `:$PORT` if the platform requires it) |
+| `CORS_ALLOWED_ORIGINS` | (empty = `*`) | Comma-separated allowed `Origin` values (e.g. `https://keep-swinging.netlify.app`). Empty keeps wide-open CORS for simple local use. |
 
 Frontend (Netlify build):
 
 | Variable | Meaning |
 |----------|---------|
 | `KEEP_SWINGING_API_BASE` | Full API origin, no trailing slash (e.g. `https://api.example.com`) |
+
+**Browser vs “real” API lock:** `CORS_ALLOWED_ORIGINS` stops **other websites** (in users’ browsers) from calling your API with `fetch`. It does **not** stop `curl`, scripts, or Postman. **Cloudflare** (free) is still useful for SSL, caching, and bot challenges on your **custom domain**, but “only Netlify may call this” in a **strong** sense needs **auth** (e.g. a secret used only by a **server**, such as a Netlify Function proxy—not a key baked into `app.js`). For a hobby app, tightening CORS plus rate limits (if needed) is usually enough.
 
 ---
 
