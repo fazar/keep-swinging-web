@@ -28,6 +28,7 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("POST /api/sessions/{id}/matches", s.handleRecordMatch)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
+	mux.HandleFunc("POST /api/sessions/{id}/reset", s.handleResetScores)
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
@@ -204,6 +205,47 @@ func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.Suggested = sug
 	sess.SuggestionKey = key
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+func (s *Server) handleResetScores(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, id, w)
+	if sess == nil {
+		return
+	}
+	if err != nil {
+		return
+	}
+
+	for i := range sess.Players {
+		sess.Players[i].GamesPlayed = 0
+		sess.Players[i].Wins = 0
+		sess.Players[i].Losses = 0
+		sess.Players[i].Draws = 0
+	}
+	sess.Matches = []session.RecordedMatch{}
+	sess.SuggestionKey = ""
+
+	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	if err != nil {
+		s.Logger.Error("pick suggestion after reset", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not build lineup after reset")
+		return
+	}
+	sess.Suggested = sug
+	sess.SuggestionKey = key
+
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not save session")

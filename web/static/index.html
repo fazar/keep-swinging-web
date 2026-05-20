@@ -72,15 +72,12 @@
         <section class="session-block session-block--first">
           <h2 class="section-heading">Suggested doubles</h2>
           <div id="suggestion" class="card"></div>
-          <label class="resting-label"
+          <label class="resting-label" for="resting-player"
             >Resting player <span class="optional-tag">(optional)</span></label
           >
-          <input
-            type="text"
-            id="resting-name"
-            autocomplete="off"
-            placeholder="Name — excluded from next lineup"
-          />
+          <select id="resting-player" autocomplete="off">
+            <option value="">— None —</option>
+          </select>
           <div class="row">
             <button type="button" id="btn-reshuffle">Reshuffle</button>
           </div>
@@ -100,27 +97,99 @@
 
         <section class="session-block">
           <h2 class="section-heading">Standings</h2>
-          <p class="hint standings-hint">Pts = 3 per win, 1 per draw.</p>
-          <div class="table-wrap">
-            <table id="standings">
-              <thead>
-                <tr>
-                  <th>Player</th>
-                  <th>GP</th>
-                  <th>W</th>
-                  <th>D</th>
-                  <th>L</th>
-                  <th>Pts</th>
-                </tr>
-              </thead>
-              <tbody></tbody>
-            </table>
+          <div
+            class="standings-tabs"
+            role="tablist"
+            aria-label="Standings view"
+          >
+            <button
+              type="button"
+              class="standings-tab standings-tab--active"
+              id="tab-standings-scored"
+              role="tab"
+              aria-selected="true"
+              aria-controls="standings-panel-scored"
+            >
+              Match points
+            </button>
+            <button
+              type="button"
+              class="standings-tab"
+              id="tab-standings-league"
+              role="tab"
+              aria-selected="false"
+              aria-controls="standings-panel-league"
+            >
+              League
+            </button>
+          </div>
+          <p id="standings-hint-scored" class="hint standings-hint">
+            Raw = total game points while you played (e.g. 3–1 gives your side
+            +3 each). Adj = raw + 1 for each match you sat out.
+          </p>
+          <p id="standings-hint-league" class="hint standings-hint hidden">
+            Raw pts = 3 per win, 1 per draw. Adj = raw + 1 for each match you
+            sat out.
+          </p>
+          <div
+            id="standings-panel-scored"
+            class="standings-panel"
+            role="tabpanel"
+            aria-labelledby="tab-standings-scored"
+          >
+            <div class="table-wrap">
+              <table id="standings-scored" class="standings-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Player</th>
+                    <th>GP</th>
+                    <th>Raw</th>
+                    <th>Adj</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+          <div
+            id="standings-panel-league"
+            class="standings-panel hidden"
+            role="tabpanel"
+            aria-labelledby="tab-standings-league"
+          >
+            <div class="table-wrap">
+              <table id="standings-league" class="standings-table">
+                <thead>
+                  <tr>
+                    <th>Rank</th>
+                    <th>Player</th>
+                    <th>GP</th>
+                    <th>W</th>
+                    <th>D</th>
+                    <th>L</th>
+                    <th>Raw</th>
+                    <th>Adj</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
           </div>
         </section>
 
         <section class="session-block">
           <h2 class="section-heading">History</h2>
+
           <ul id="history" class="history"></ul>
+          <div class="history-actions">
+            <button type="button" id="btn-reset-scores" class="secondary">
+              Reset standings &amp; history
+            </button>
+            <span class="history-reset-hint"
+              >Keeps the same players; clears match history and standings.</span
+            >
+          </div>
         </section>
       </div>
     </main>

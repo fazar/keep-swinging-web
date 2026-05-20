@@ -98,24 +98,198 @@ function clearScoreFields() {
   form.elements.score_b.value = "";
 }
 
-function resolveExcludeIdsFromRestingName(players, rawName) {
-  const q = rawName.trim();
-  if (!q) return { ids: [], error: null };
-  const lower = q.toLowerCase();
-  const hits = players.filter((p) => p.name.trim().toLowerCase() === lower);
-  if (hits.length === 0) return { ids: [], error: `No player named "${q}"` };
-  if (hits.length > 1)
-    return {
-      ids: [],
-      error: `Multiple players named "${q}" — use unique names`,
-    };
-  return { ids: [hits[0].id], error: null };
-}
-
 function idToNameMap(players) {
   const m = Object.create(null);
   for (const p of players) m[p.id] = p.name;
   return m;
+}
+
+function fillRestingPlayerSelect(players) {
+  const sel = document.getElementById("resting-player");
+  if (!sel) return;
+  const prev = sel.value;
+  sel.innerHTML = '<option value="">— None —</option>';
+  const sorted = [...(players || [])].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  for (const p of sorted) {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name;
+    sel.appendChild(opt);
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) {
+    sel.value = prev;
+  } else {
+    sel.value = "";
+  }
+}
+
+/** Per-player totals: each game adds the team's score to every player on that team. */
+function aggregatePlayerMatchPoints(matches, players) {
+  const rows = players.map((p) => ({
+    id: p.id,
+    name: p.name,
+    gp: 0,
+    scored: 0,
+  }));
+  const byId = Object.create(null);
+  for (const r of rows) byId[r.id] = r;
+
+  for (const m of matches || []) {
+    const sa = Number(m.score_a) || 0;
+    const sb = Number(m.score_b) || 0;
+    for (const id of m.team_a_ids || []) {
+      const r = byId[id];
+      if (r) {
+        r.gp += 1;
+        r.scored += sa;
+      }
+    }
+    for (const id of m.team_b_ids || []) {
+      const r = byId[id];
+      if (r) {
+        r.gp += 1;
+        r.scored += sb;
+      }
+    }
+  }
+
+  const nMatch = (matches || []).length;
+  for (const r of rows) {
+    r.sitOuts = nMatch - r.gp;
+    r.adjusted = r.scored + r.sitOuts;
+  }
+
+  rows.sort((a, b) => {
+    if (b.adjusted !== a.adjusted) return b.adjusted - a.adjusted;
+    if (b.scored !== a.scored) return b.scored - a.scored;
+    if (b.gp !== a.gp) return b.gp - a.gp;
+    return a.name.localeCompare(b.name);
+  });
+  return rows;
+}
+
+function addCompetitionRanks(sorted, tiedFn) {
+  const ranks = new Array(sorted.length);
+  for (let i = 0; i < sorted.length; i++) {
+    if (i === 0) ranks[i] = 1;
+    else if (tiedFn(sorted[i], sorted[i - 1])) ranks[i] = ranks[i - 1];
+    else ranks[i] = i + 1;
+  }
+  return ranks;
+}
+
+function renderMatchPointStandings(matches, players) {
+  const tb = $("#standings-scored tbody");
+  if (!tb) return;
+  tb.innerHTML = "";
+  const rows = aggregatePlayerMatchPoints(matches, players);
+  const hasPlay = rows.some((r) => r.gp > 0);
+  if (!hasPlay) {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      '<td colspan="5" class="standings-empty">No matches yet. Record a result to see scoring totals.</td>';
+    tb.appendChild(tr);
+    return;
+  }
+
+  const tied = (a, b) =>
+    a.adjusted === b.adjusted &&
+    a.scored === b.scored &&
+    a.gp === b.gp;
+  const ranks = addCompetitionRanks(rows, tied);
+
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const tr = document.createElement("tr");
+    tr.innerHTML = `<td>${ranks[i]}</td><td>${escapeHtml(r.name)}<div class="pid">${escapeHtml(r.id)}</div></td><td>${r.gp}</td><td>${r.scored}</td><td>${r.adjusted}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function renderLeagueStandings(matches, players) {
+  const tb = $("#standings-league tbody");
+  if (!tb) return;
+  tb.innerHTML = "";
+  const nMatch = (matches || []).length;
+
+  const rows = players.map((p) => {
+    const raw = playerPoints(p);
+    const sitOuts = nMatch - (p.games_played || 0);
+    const adjusted = raw + sitOuts;
+    return { p, raw, adjusted };
+  });
+
+  const sorted = rows.sort((a, b) => {
+    if (b.adjusted !== a.adjusted) return b.adjusted - a.adjusted;
+    if (b.raw !== a.raw) return b.raw - a.raw;
+    if (b.p.wins !== a.p.wins) return b.p.wins - a.p.wins;
+    const bd = b.p.draws || 0;
+    const ad = a.p.draws || 0;
+    if (bd !== ad) return bd - ad;
+    if (b.p.losses !== a.p.losses) return b.p.losses - a.p.losses;
+    if (b.p.games_played !== a.p.games_played)
+      return b.p.games_played - a.p.games_played;
+    return a.p.name.localeCompare(b.p.name);
+  });
+
+  const leagueTied = (a, b) =>
+    a.adjusted === b.adjusted &&
+    a.raw === b.raw &&
+    a.p.wins === b.p.wins &&
+    (a.p.draws || 0) === (b.p.draws || 0) &&
+    a.p.losses === b.p.losses &&
+    a.p.games_played === b.p.games_played;
+  const ranks = addCompetitionRanks(sorted, leagueTied);
+
+  for (let i = 0; i < sorted.length; i++) {
+    const { p, raw, adjusted } = sorted[i];
+    const tr = document.createElement("tr");
+    const d = p.draws ?? 0;
+    tr.innerHTML = `<td>${ranks[i]}</td><td>${escapeHtml(p.name)}<div class="pid">${escapeHtml(p.id)}</div></td><td>${p.games_played}</td><td>${p.wins}</td><td>${d}</td><td>${p.losses}</td><td>${raw}</td><td>${adjusted}</td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function renderStandings(sess) {
+  renderMatchPointStandings(sess.matches, sess.players);
+  renderLeagueStandings(sess.matches, sess.players);
+}
+
+function wireStandingsTabs() {
+  const tabScored = $("#tab-standings-scored");
+  const tabLeague = $("#tab-standings-league");
+  const panelScored = $("#standings-panel-scored");
+  const panelLeague = $("#standings-panel-league");
+  const hintScored = $("#standings-hint-scored");
+  const hintLeague = $("#standings-hint-league");
+  if (!tabScored || !tabLeague) return;
+
+  function activateMatchPoints(on) {
+    if (on) {
+      tabScored.classList.add("standings-tab--active");
+      tabLeague.classList.remove("standings-tab--active");
+      tabScored.setAttribute("aria-selected", "true");
+      tabLeague.setAttribute("aria-selected", "false");
+      panelScored?.classList.remove("hidden");
+      panelLeague?.classList.add("hidden");
+      hintScored?.classList.remove("hidden");
+      hintLeague?.classList.add("hidden");
+    } else {
+      tabLeague.classList.add("standings-tab--active");
+      tabScored.classList.remove("standings-tab--active");
+      tabLeague.setAttribute("aria-selected", "true");
+      tabScored.setAttribute("aria-selected", "false");
+      panelLeague?.classList.remove("hidden");
+      panelScored?.classList.add("hidden");
+      hintLeague?.classList.remove("hidden");
+      hintScored?.classList.add("hidden");
+    }
+  }
+
+  tabScored.addEventListener("click", () => activateMatchPoints(true));
+  tabLeague.addEventListener("click", () => activateMatchPoints(false));
 }
 
 const HISTORY_MONTHS = [
@@ -166,32 +340,11 @@ async function loadSession(id) {
   const sess = await api(`/api/sessions/${id}`);
   $("#session-meta").textContent =
     `${String(sess.sport).toUpperCase()} · Session ${id}`;
-  renderStandings(sess.players);
+  renderStandings(sess);
   renderSuggestion(sess);
   renderHistory(sess.matches, sess.players);
+  fillRestingPlayerSelect(sess.players);
   window.__session = sess;
-}
-
-function renderStandings(players) {
-  const tb = $("#standings tbody");
-  tb.innerHTML = "";
-  const sorted = [...players].sort((a, b) => {
-    const pb = playerPoints(b);
-    const pa = playerPoints(a);
-    if (pb !== pa) return pb - pa;
-    if (b.wins !== a.wins) return b.wins - a.wins;
-    const bd = b.draws || 0;
-    const ad = a.draws || 0;
-    if (bd !== ad) return bd - ad;
-    return b.games_played - a.games_played;
-  });
-  for (const p of sorted) {
-    const tr = document.createElement("tr");
-    const d = p.draws ?? 0;
-    const pts = playerPoints(p);
-    tr.innerHTML = `<td>${escapeHtml(p.name)}<div class="pid">${escapeHtml(p.id)}</div></td><td>${p.games_played}</td><td>${p.wins}</td><td>${d}</td><td>${p.losses}</td><td>${pts}</td>`;
-    tb.appendChild(tr);
-  }
 }
 
 function renderSuggestion(sess) {
@@ -310,7 +463,7 @@ $("#match-form").addEventListener("submit", async (e) => {
       body: JSON.stringify(body),
     });
     window.__session = updated;
-    renderStandings(updated.players);
+    renderStandings(updated);
     renderSuggestion(updated);
     renderHistory(updated.matches, updated.players);
     clearScoreFields();
@@ -323,15 +476,10 @@ $("#match-form").addEventListener("submit", async (e) => {
 $("#btn-reshuffle").addEventListener("click", async () => {
   const sess = window.__session;
   if (!sess) return;
-  const restingRaw = document.getElementById("resting-name").value;
-  const { ids: excludeIds, error } = resolveExcludeIdsFromRestingName(
-    sess.players,
-    restingRaw,
-  );
-  if (error) {
-    toast(error);
-    return;
-  }
+  const sel = document.getElementById("resting-player");
+  const rid = sel && sel.value ? String(sel.value).trim() : "";
+  const idSet = new Set(sess.players.map((p) => p.id));
+  const excludeIds = rid && idSet.has(rid) ? [rid] : [];
   const payload = JSON.stringify({ exclude_player_ids: excludeIds });
   try {
     const updated = await api(`/api/sessions/${sess.id}/reshuffle`, {
@@ -342,6 +490,30 @@ $("#btn-reshuffle").addEventListener("click", async () => {
     renderSuggestion(updated);
     clearScoreFields();
     toast("Lineup updated");
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$("#btn-reset-scores").addEventListener("click", async () => {
+  const sess = window.__session;
+  if (!sess) return;
+  const ok = window.confirm(
+    "Reset all match history and standings for this session? Players stay the same.",
+  );
+  if (!ok) return;
+  try {
+    const updated = await api(`/api/sessions/${sess.id}/reset`, {
+      method: "POST",
+      body: "{}",
+    });
+    window.__session = updated;
+    renderStandings(updated);
+    renderSuggestion(updated);
+    renderHistory(updated.matches, updated.players);
+    fillRestingPlayerSelect(updated.players);
+    clearScoreFields();
+    toast("Standings and history cleared");
   } catch (err) {
     toast(err.message);
   }
@@ -371,6 +543,8 @@ $("#copy-link").addEventListener("click", async () => {
     toast(url);
   }
 });
+
+wireStandingsTabs();
 
 function boot() {
   warnIfStaticSiteWithoutApiBase();

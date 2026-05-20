@@ -54,14 +54,13 @@ Environment variables (see `.env.example`):
 | `GET` | `/api/sessions/{id}` | Full session JSON |
 | `POST` | `/api/sessions/{id}/matches` | Body: `team_a_ids`, `team_b_ids` (2 each), `score_a`, `score_b` |
 | `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"exclude_player_ids":["..."]}` |
-
-The UI calls these on the same origin. For split hosting later, enable CORS on the API (already `*` for simple cases).
+| `POST` | `/api/sessions/{id}/reset` | Clears match history and zeros standings; same player ids/names | For split hosting later, enable CORS on the API (already `*` for simple cases).
 
 ## Scheduling
 
 - **Fairness:** Among valid lineups, prefer players with fewer total games played on court.
 - **Partner rotation:** We avoid pairing two players together again until **each** has partnered **every other person** in the session at least once (using saved match history). If that leaves no legal lineup for a pick, we temporarily relax and use fairness only.
-- **Standings:** Wins / losses / **draws** (ties). **Points** = 3×wins + 1×draws (displayed in the UI).
+- **Standings:** **Match points** tab: raw total = sum of your side’s game scores in each match you played; **adj** adds +1 per match you sat out. **League** tab: raw pts = 3×wins + 1×draws; **adj** adds +1 per sit-out. Rank uses **adj** first, with competition-style ties.
 
 Implementation: `internal/scheduler/doubles.go`.
 
