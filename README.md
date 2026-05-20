@@ -51,6 +51,7 @@ Environment variables (see `.env.example`):
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/api/sessions` | Body: `{"sport":"padel","players":["Alice",...]}` (4–16 names) |
+| `GET` | `/api/health` | `200` + `{"ok":true}` when Redis is reachable (use to detect cold start / readiness) |
 | `GET` | `/api/sessions/{id}` | Full session JSON |
 | `POST` | `/api/sessions/{id}/matches` | Body: `team_a_ids`, `team_b_ids` (2 each), `score_a`, `score_b` |
 | `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"exclude_player_ids":["..."]}` |

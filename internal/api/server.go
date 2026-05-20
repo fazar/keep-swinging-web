@@ -24,11 +24,27 @@ type Server struct {
 
 // Mount registers API routes on mux (Go 1.22+ patterns).
 func Mount(mux *http.ServeMux, s *Server) {
+	mux.HandleFunc("GET /api/health", s.handleHealth)
 	mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("POST /api/sessions/{id}/matches", s.handleRecordMatch)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
 	mux.HandleFunc("POST /api/sessions/{id}/reset", s.handleResetScores)
+}
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+	if err := s.Store.Ping(ctx); err != nil {
+		s.Logger.Error("health ping", "err", err)
+		writeError(w, http.StatusServiceUnavailable, "storage unavailable")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {

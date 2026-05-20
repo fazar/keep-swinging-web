@@ -18,13 +18,7 @@ function apiUrl(path) {
 /** Netlify/etc. only serve static files; /api must go to the Go backend. */
 function warnIfStaticSiteWithoutApiBase() {
   if (apiBase()) return;
-  const h = location.hostname;
-  const looksLikeStaticHost =
-    /\.netlify\.app$/i.test(h) ||
-    /\.vercel\.app$/i.test(h) ||
-    /\.pages\.dev$/i.test(h) ||
-    /\.github\.io$/i.test(h);
-  if (!looksLikeStaticHost) return;
+  if (!looksLikeStaticHostOnly()) return;
   const detail =
     "Add KEEP_SWINGING_API_BASE (your Render/Fly API URL, no trailing slash) in the host env vars, then redeploy. See DEPLOY.md.";
   console.warn("[Keep Swinging]", detail);
@@ -58,6 +52,64 @@ async function api(path, opts = {}) {
     throw new Error(err);
   }
   return data;
+}
+
+function looksLikeStaticHostOnly() {
+  const h = location.hostname;
+  return (
+    /\.netlify\.app$/i.test(h) ||
+    /\.vercel\.app$/i.test(h) ||
+    /\.pages\.dev$/i.test(h) ||
+    /\.github\.io$/i.test(h)
+  );
+}
+
+/** When true, show loading until /api/health succeeds (cold start on Render, etc.). */
+function shouldPingApi() {
+  if (apiBase()) return true;
+  return !looksLikeStaticHostOnly();
+}
+
+function setLoadingUi(kind) {
+  const title = document.getElementById("loading-title");
+  const hint = document.getElementById("loading-hint");
+  if (!title || !hint) return;
+  if (kind === "session") {
+    title.textContent = "Loading session…";
+    hint.textContent = "Blackbird singing in the dead of night..";
+  } else {
+    title.textContent = "Connecting to server…";
+    hint.textContent = "Hey antek antek async..";
+  }
+}
+
+const API_READY_ATTEMPTS = 35;
+const API_READY_DELAY_MS = 2000;
+
+async function waitForApiReady() {
+  let lastErr;
+  for (let i = 0; i < API_READY_ATTEMPTS; i++) {
+    try {
+      const res = await fetch(apiUrl("/api/health"), {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (res.ok) return;
+      let detail = "";
+      try {
+        detail = await res.text();
+      } catch (_) {
+        /* ignore */
+      }
+      lastErr = new Error(detail || `HTTP ${res.status}`);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+    }
+    await new Promise((r) => setTimeout(r, API_READY_DELAY_MS));
+  }
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("Server did not become ready in time.");
 }
 
 function playerRows(count) {
@@ -195,9 +247,7 @@ function renderMatchPointStandings(matches, players) {
   }
 
   const tied = (a, b) =>
-    a.adjusted === b.adjusted &&
-    a.scored === b.scored &&
-    a.gp === b.gp;
+    a.adjusted === b.adjusted && a.scored === b.scored && a.gp === b.gp;
   const ranks = addCompetitionRanks(rows, tied);
 
   for (let i = 0; i < rows.length; i++) {
@@ -524,10 +574,34 @@ function goHome() {
   window.__suggestion = null;
   $("#view-session").classList.add("hidden");
   $("#view-loading").classList.add("hidden");
-  $("#view-home").classList.remove("hidden");
-  playerRows(6);
   const path = location.pathname || "/";
   history.replaceState(null, "", path);
+
+  if (shouldPingApi()) {
+    $("#view-home").classList.add("hidden");
+    $("#view-loading").classList.remove("hidden");
+    $("#view-loading").setAttribute("aria-busy", "true");
+    setLoadingUi("wake");
+    waitForApiReady()
+      .then(() => {
+        $("#view-loading").classList.add("hidden");
+        $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-home").classList.remove("hidden");
+        playerRows(6);
+      })
+      .catch(() => {
+        $("#view-loading").classList.add("hidden");
+        $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-home").classList.remove("hidden");
+        playerRows(6);
+        toast(
+          "Could not reach the server yet. Wait a moment and try New session again.",
+        );
+      });
+  } else {
+    $("#view-home").classList.remove("hidden");
+    playerRows(6);
+  }
 }
 
 $("#btn-new-session").addEventListener("click", goHome);
@@ -548,7 +622,6 @@ wireStandingsTabs();
 
 function boot() {
   warnIfStaticSiteWithoutApiBase();
-  playerRows(6);
   const params = new URLSearchParams(location.search);
   const id = params.get("id");
   if (id) {
@@ -556,7 +629,19 @@ function boot() {
     $("#view-session").classList.add("hidden");
     $("#view-loading").classList.remove("hidden");
     $("#view-loading").setAttribute("aria-busy", "true");
-    loadSession(id)
+    if (shouldPingApi()) {
+      setLoadingUi("wake");
+    } else {
+      setLoadingUi("session");
+    }
+    const startLoad = () => {
+      setLoadingUi("session");
+      return loadSession(id);
+    };
+    const pipeline = shouldPingApi()
+      ? waitForApiReady().then(startLoad)
+      : startLoad();
+    pipeline
       .then(() => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
@@ -568,6 +653,32 @@ function boot() {
         toast(e.message);
         $("#view-home").classList.remove("hidden");
       });
+    return;
+  }
+
+  if (shouldPingApi()) {
+    $("#view-home").classList.add("hidden");
+    $("#view-loading").classList.remove("hidden");
+    $("#view-loading").setAttribute("aria-busy", "true");
+    setLoadingUi("wake");
+    waitForApiReady()
+      .then(() => {
+        $("#view-loading").classList.add("hidden");
+        $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-home").classList.remove("hidden");
+        playerRows(6);
+      })
+      .catch(() => {
+        $("#view-loading").classList.add("hidden");
+        $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-home").classList.remove("hidden");
+        playerRows(6);
+        toast(
+          "Could not reach the server yet. Check the API URL or wait and refresh.",
+        );
+      });
+  } else {
+    playerRows(6);
   }
 }
 
