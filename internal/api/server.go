@@ -32,6 +32,7 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("POST /api/sessions/{id}/matches", s.handleRecordMatch)
 	mux.HandleFunc("DELETE /api/sessions/{id}/matches/{match_index}", s.handleDeleteMatch)
+	mux.HandleFunc("PATCH /api/sessions/{id}/matches/{match_index}", s.handlePatchMatchScores)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
 	mux.HandleFunc("POST /api/sessions/{id}/reset", s.handleResetScores)
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", s.handlePatchSessionConfig)
@@ -95,6 +96,8 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	k0 := session.DefaultSitOutScore(sp)
 	sess.SitOutScore = &k0
+
+	session.EnsureHideInactiveDefaults(sess)
 
 	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
 	if err != nil {
@@ -253,6 +256,72 @@ func (s *Server) handleDeleteMatch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sess)
 }
 
+type patchMatchScoresBody struct {
+	ScoreA int `json:"score_a"`
+	ScoreB int `json:"score_b"`
+}
+
+func (s *Server) handlePatchMatchScores(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	idxStr := strings.TrimSpace(r.PathValue("match_index"))
+	idx, errConv := strconv.Atoi(idxStr)
+	if errConv != nil || idx < 0 {
+		writeError(w, http.StatusBadRequest, "invalid match index")
+		return
+	}
+
+	var body patchMatchScoresBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.ScoreA < 0 || body.ScoreB < 0 {
+		writeError(w, http.StatusBadRequest, "scores must be non-negative")
+		return
+	}
+
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, id, w)
+	if sess == nil {
+		return
+	}
+	if err != nil {
+		return
+	}
+	if idx >= len(sess.Matches) {
+		writeError(w, http.StatusBadRequest, "match index out of range")
+		return
+	}
+
+	rec := sess.Matches[idx]
+	revertMatchResult(sess, rec)
+	upd := rec
+	upd.ScoreA = body.ScoreA
+	upd.ScoreB = body.ScoreB
+	applyMatchResult(sess, upd)
+	sess.Matches[idx] = upd
+
+	sug, key, errPick := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	if errPick != nil {
+		s.Logger.Error("pick suggestion after patch match scores", "err", errPick)
+		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
+		return
+	}
+	sess.Suggested = sug
+	sess.SuggestionKey = key
+
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
 type reshuffleBody struct {
 	ExcludePlayerIDs []string `json:"exclude_player_ids"`
 }
@@ -292,7 +361,9 @@ func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
 }
 
 type patchSessionConfigBody struct {
-	SitOutScore *float64 `json:"sit_out_score"`
+	SitOutScore               *float64 `json:"sit_out_score"`
+	HideInactiveFromStandings *bool    `json:"hide_inactive_from_standings"`
+	HideInactiveFromMatches   *bool    `json:"hide_inactive_from_matches"`
 }
 
 func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request) {
@@ -314,20 +385,33 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if body.SitOutScore == nil {
-		writeError(w, http.StatusBadRequest, "sit_out_score required")
+	hasK := body.SitOutScore != nil
+	hasHS := body.HideInactiveFromStandings != nil
+	hasHM := body.HideInactiveFromMatches != nil
+	if !hasK && !hasHS && !hasHM {
+		writeError(w, http.StatusBadRequest, "provide sit_out_score and/or visibility flags")
 		return
 	}
-	v := *body.SitOutScore
-	if math.IsNaN(v) || math.IsInf(v, 0) {
-		writeError(w, http.StatusBadRequest, "sit_out_score must be a finite number")
-		return
+	if hasK {
+		v := *body.SitOutScore
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			writeError(w, http.StatusBadRequest, "sit_out_score must be a finite number")
+			return
+		}
+		if v < 0 || v > 1000 {
+			writeError(w, http.StatusBadRequest, "sit_out_score must be between 0 and 1000")
+			return
+		}
+		sess.SitOutScore = &v
 	}
-	if v < 0 || v > 1000 {
-		writeError(w, http.StatusBadRequest, "sit_out_score must be between 0 and 1000")
-		return
+	if hasHS {
+		sess.HideInactiveFromStandings = body.HideInactiveFromStandings
 	}
-	sess.SitOutScore = &v
+	if hasHM {
+		sess.HideInactiveFromMatches = body.HideInactiveFromMatches
+	}
+	session.EnsureHideInactiveDefaults(sess)
+
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session config", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not save session")

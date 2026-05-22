@@ -55,9 +55,10 @@ Environment variables (see `.env.example`):
 | `GET` | `/api/sessions/{id}` | Full session JSON; each player may include `inactive: true` (**away**: out of matchup rotation, counts & history kept) |
 | `POST` | `/api/sessions/{id}/matches` | Body: `team_a_ids`, `team_b_ids` (2 each), `score_a`, `score_b` — rejects inactive IDs |
 | `DELETE` | `/api/sessions/{id}/matches/{match_index}` | Removes one recorded match **`match_index`** in `matches` array order (`0` = oldest …); rewinds standings and refreshes lineup |
+| `PATCH` | `/api/sessions/{id}/matches/{match_index}` | Body: `{"score_a":6,"score_b":4}` — updates only scores; rewinds then reapplies standings and refreshes lineup |
 | `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"exclude_player_ids":["..."]}` (`exclude` resting only applies to players **in shuffle**) |
 | `POST` | `/api/sessions/{id}/reset` | Clears match history and zeros standings; keeps roster (including inactive flags); same player ids/names |
-| `PATCH` | `/api/sessions/{id}/config` | Body: `{"sit_out_score":3}` — parity multiplier **k** (0–1000) saved on the session; omit on GET ⇒ default **by sport**: tennis **2**, padel **10** |
+| `PATCH` | `/api/sessions/{id}/config` | Partial update: `sit_out_score` (0–1000, optional unless no other keys), `hide_inactive_from_standings`, `hide_inactive_from_matches` (each optional; booleans — when **true**, away players are omitted from standings / finished games that include any away player are hidden from history and standings aggregates on clients that honor them); both default **true** when omitted from stored JSON |
 | `POST` | `/api/sessions/{id}/players` | Body: `{"name":"Ada"}` — add new player (**≤16** roster) **or**, if exactly one inactive player matches the name (**case-insensitive**), revive them (`inactive: false`); rejects duplicate active names |
 | `DELETE` | `/api/sessions/{id}/players/{player_id}` | Mark player **inactive** (**away from shuffle**); need **>4** shuffle-active afterwards; preserves history / standings IDs |
 

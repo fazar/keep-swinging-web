@@ -59,4 +59,24 @@ type Session struct {
 	// SitOutScore is multiplied by (leader GP − your GP) in standings parity.
 	// Omitted/absent in storage ⇒ UI uses DefaultSitOutScore(sport).
 	SitOutScore *float64 `json:"sit_out_score,omitempty"`
+	// HideInactiveFromStandings when true omits inactive (away) players from standings tables (default).
+	HideInactiveFromStandings *bool `json:"hide_inactive_from_standings,omitempty"`
+	// HideInactiveFromMatches when true hides entire finished games that touch an inactive (away) roster member in UI (default).
+	HideInactiveFromMatches *bool `json:"hide_inactive_from_matches,omitempty"`
 }
+
+// EnsureHideInactiveDefaults sets hide flags to true when unset (backward compatible stored JSON).
+func EnsureHideInactiveDefaults(s *Session) {
+	if s == nil {
+		return
+	}
+	if s.HideInactiveFromStandings == nil {
+		t := true
+		s.HideInactiveFromStandings = &t
+	}
+	if s.HideInactiveFromMatches == nil {
+		t := true
+		s.HideInactiveFromMatches = &t
+	}
+}
+

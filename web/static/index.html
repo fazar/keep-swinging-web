@@ -284,10 +284,27 @@
                 name="sit_out_score"
                 step="any"
                 min="0"
+                max="1000"
                 inputmode="decimal"
                 autocomplete="off"
                 required
               />
+              <div class="session-config-toggles" role="group" aria-label="Away roster visibility">
+                <label class="session-config-switch-row">
+                  <span class="session-config-switch-text">Hide away roster in standings</span>
+                  <span class="session-config-switch-visual">
+                    <input type="checkbox" id="config-hide-inactive-standings" class="session-config-switch-input" role="switch" checked />
+                    <span class="session-config-switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+                <label class="session-config-switch-row">
+                  <span class="session-config-switch-text">Hide finished games that involve anyone Away</span>
+                  <span class="session-config-switch-visual">
+                    <input type="checkbox" id="config-hide-inactive-matches" class="session-config-switch-input" role="switch" checked />
+                    <span class="session-config-switch-track" aria-hidden="true"></span>
+                  </span>
+                </label>
+              </div>
               <button type="submit" id="btn-save-session-config">
                 Save config
               </button>

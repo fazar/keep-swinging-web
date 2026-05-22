@@ -220,6 +220,107 @@ function effectiveSitOutScore(sess) {
   return defaultSitOutScoreForSport(sess.sport);
 }
 
+/** When true (default), omit away (inactive) players from standings tables. */
+function effectiveHideInactiveFromStandings(sess) {
+  const v = sess?.hide_inactive_from_standings;
+  return v !== false;
+}
+
+/** When true (default), finished matches that involve anyone currently away are ignored (history + standings aggregates). */
+function effectiveHideInactiveFromMatches(sess) {
+  const v = sess?.hide_inactive_from_matches;
+  return v !== false;
+}
+
+function standingsPlayersForDisplay(sess) {
+  const pl = sess?.players ?? [];
+  if (!effectiveHideInactiveFromStandings(sess)) return [...pl];
+  return pl.filter((p) => !p.inactive);
+}
+
+/** id → Player for roster lookups */
+function idToPlayerById(players) {
+  const m = Object.create(null);
+  for (const p of players || []) m[p.id] = p;
+  return m;
+}
+
+/** Match touches a player marked inactive on the roster (current away state). */
+function matchInvolvesInactivePlayer(m, playerById) {
+  for (const id of m.team_a_ids || []) {
+    if (playerById[id]?.inactive) return true;
+  }
+  for (const id of m.team_b_ids || []) {
+    if (playerById[id]?.inactive) return true;
+  }
+  return false;
+}
+
+/** Matches used for standings aggregates and counted in history when hiding games with away roster members */
+function matchesForStandingsAndAggregate(sess) {
+  const all = sess?.matches ?? [];
+  if (!sess || !effectiveHideInactiveFromMatches(sess)) return [...all];
+  const byId = idToPlayerById(sess.players || []);
+  return all.filter((m) => !matchInvolvesInactivePlayer(m, byId));
+}
+
+/** Recompute W/L/D/GP from a subset of matches (for league tab parity with filters). */
+function recomputeLeagueStatsFromMatches(matches, players) {
+  const stats = Object.create(null);
+  for (const p of players) {
+    stats[p.id] = {
+      games_played: 0,
+      wins: 0,
+      losses: 0,
+      draws: 0,
+    };
+  }
+
+  for (const m of matches || []) {
+    const sa = Number(m.score_a) || 0;
+    const sb = Number(m.score_b) || 0;
+    const a = m.team_a_ids || [];
+    const b = m.team_b_ids || [];
+    const ids = [...a, ...b];
+    for (const id of ids) {
+      const s = stats[id];
+      if (s) s.games_played += 1;
+    }
+    if (sa > sb) {
+      for (const id of a) {
+        const s = stats[id];
+        if (s) s.wins += 1;
+      }
+      for (const id of b) {
+        const s = stats[id];
+        if (s) s.losses += 1;
+      }
+    } else if (sb > sa) {
+      for (const id of b) {
+        const s = stats[id];
+        if (s) s.wins += 1;
+      }
+      for (const id of a) {
+        const s = stats[id];
+        if (s) s.losses += 1;
+      }
+    } else {
+      for (const id of ids) {
+        const s = stats[id];
+        if (s) s.draws += 1;
+      }
+    }
+  }
+
+  return players.map((p) => ({
+    ...p,
+    games_played: stats[p.id]?.games_played ?? 0,
+    wins: stats[p.id]?.wins ?? 0,
+    losses: stats[p.id]?.losses ?? 0,
+    draws: stats[p.id]?.draws ?? 0,
+  }));
+}
+
 function doublesNamesParen(players) {
   if (!players || !players.length) return "";
   return players.map((p) => (p.name || "").trim() || "?").join(" · ");
@@ -267,13 +368,14 @@ function setLineupControlsBusy(busy) {
 
 function refreshSessionView(sess) {
   window.__session = sess;
+  window.__historyEditIdx = null;
   $("#session-meta").textContent =
     `${String(sess.sport).toUpperCase()} · Session ${sess.id}`;
   const k = effectiveSitOutScore(sess);
   renderStandings(sess, k);
   renderSuggestion(sess);
   updateRecordMatchLabels(sess);
-  renderHistory(sess.matches, sess.players);
+  renderHistory(sess.matches, sess.players, sess);
   fillRestingPlayerSelect(sess.players);
   renderSessionSetup(sess);
   setLineupControlsBusy(false);
@@ -358,7 +460,7 @@ function addCompetitionRanks(sorted, tiedFn) {
   return ranks;
 }
 
-function renderMatchPointStandings(matches, players, parityK) {
+function renderMatchPointStandings(matches, players, parityK, emptyHint) {
   const tb = $("#standings-scored tbody");
   if (!tb) return;
   tb.innerHTML = "";
@@ -366,8 +468,11 @@ function renderMatchPointStandings(matches, players, parityK) {
   const hasPlay = rows.some((r) => r.gp > 0);
   if (!hasPlay) {
     const tr = document.createElement("tr");
-    tr.innerHTML =
-      '<td colspan="5" class="standings-empty">No matches yet. Record a result to see scoring totals.</td>';
+    const msg =
+      typeof emptyHint === "string" && emptyHint
+        ? emptyHint
+        : "No matches yet. Record a result to see scoring totals.";
+    tr.innerHTML = `<td colspan="5" class="standings-empty">${escapeHtml(msg)}</td>`;
     tb.appendChild(tr);
     return;
   }
@@ -384,7 +489,7 @@ function renderMatchPointStandings(matches, players, parityK) {
   }
 }
 
-function renderLeagueStandings(_matches, players, parityK) {
+function renderLeagueStandings(players, parityK) {
   const tb = $("#standings-league tbody");
   if (!tb) return;
   tb.innerHTML = "";
@@ -434,13 +539,45 @@ function renderLeagueStandings(_matches, players, parityK) {
 }
 
 function renderStandings(sess, parityK = effectiveSitOutScore(sess)) {
-  renderMatchPointStandings(sess.matches, sess.players, parityK);
-  renderLeagueStandings(sess.matches, sess.players, parityK);
+  const pl = standingsPlayersForDisplay(sess);
+  const mAgg = matchesForStandingsAndAggregate(sess);
+  const all = sess?.matches ?? [];
+  const filteredAllAway =
+    sess &&
+    effectiveHideInactiveFromMatches(sess) &&
+    all.length > 0 &&
+    mAgg.length === 0;
+  const mpHint = filteredAllAway
+    ? "Games that include players currently Away are hidden. Turn off Session setup or mark players Active to include them."
+    : null;
+  renderMatchPointStandings(mAgg, pl, parityK, mpHint);
+  const leaguePl =
+    sess && effectiveHideInactiveFromMatches(sess)
+      ? recomputeLeagueStatsFromMatches(mAgg, pl)
+      : pl;
+  renderLeagueStandings(leaguePl, parityK);
 }
 
 function renderSessionSetup(sess) {
   const scoreInp = $("#config-sit-out-score");
   if (scoreInp) scoreInp.value = String(effectiveSitOutScore(sess));
+
+  const chkStandings = $("#config-hide-inactive-standings");
+  const chkMatches = $("#config-hide-inactive-matches");
+  if (chkStandings) {
+    chkStandings.checked = effectiveHideInactiveFromStandings(sess);
+    chkStandings.setAttribute(
+      "aria-checked",
+      chkStandings.checked ? "true" : "false",
+    );
+  }
+  if (chkMatches) {
+    chkMatches.checked = effectiveHideInactiveFromMatches(sess);
+    chkMatches.setAttribute(
+      "aria-checked",
+      chkMatches.checked ? "true" : "false",
+    );
+  }
 
   const plist = sess.players || [];
   const activePl = shuffleActivePlayers(plist);
@@ -605,7 +742,11 @@ function formatHistoryWhenPlayed(isoString) {
 }
 
 function formatHistoryPartners(ids, nameMap) {
-  return ids.map((id) => escapeHtml(nameMap[id] || id)).join(" & ");
+  const parts = [];
+  for (const id of ids || []) {
+    parts.push(escapeHtml(nameMap[id] || id));
+  }
+  return parts.join(" & ");
 }
 
 async function loadSession(id) {
@@ -638,66 +779,140 @@ function renderSuggestion(sess) {
   window.__suggestion = sug;
 }
 
-function renderHistory(matches, players) {
+function renderHistory(matches, players, sess) {
   const ul = $("#history");
   ul.innerHTML = "";
   const nameMap = idToNameMap(players);
+  const partnerById = idToPlayerById(players);
+  const hideMatchesWithAway = sess
+    ? effectiveHideInactiveFromMatches(sess)
+    : true;
   const list = matches || [];
+  const editingIdx = window.__historyEditIdx;
+
+  function historyScoreMarkup(sa, sb, isEditing, scoreWinA, scoreWinB) {
+    if (isEditing) {
+      return {
+        a: `<input type="number" class="history-score-input" data-score-side="left" min="0" step="1" value="${sa}" inputmode="numeric" aria-label="Team Left score">`,
+        b: `<input type="number" class="history-score-input" data-score-side="right" min="0" step="1" value="${sb}" inputmode="numeric" aria-label="Team Right score">`,
+      };
+    }
+    return {
+      a: `<span class="history-score${scoreWinA}">${sa}</span>`,
+      b: `<span class="history-score${scoreWinB}">${sb}</span>`,
+    };
+  }
+
   for (let matchIndex = list.length - 1; matchIndex >= 0; matchIndex--) {
     const m = list[matchIndex];
+    if (hideMatchesWithAway && matchInvolvesInactivePlayer(m, partnerById)) {
+      continue;
+    }
     const li = document.createElement("li");
+    const idxAttr = String(matchIndex);
+    li.className = "history-item";
+    li.dataset.matchIndex = idxAttr;
     const when = formatHistoryWhenPlayed(m.played_at);
     const sideA = formatHistoryPartners(m.team_a_ids, nameMap);
     const sideB = formatHistoryPartners(m.team_b_ids, nameMap);
     const sa = Number(m.score_a) || 0;
     const sb = Number(m.score_b) || 0;
+    const isEditing =
+      typeof editingIdx === "number" &&
+      Number.isFinite(editingIdx) &&
+      editingIdx === matchIndex;
+
     let outcomeAria = "";
     let scoreWinA = "";
     let scoreWinB = "";
-    if (sa > sb) {
+    if (!isEditing && sa > sb) {
       scoreWinA = " history-score--winner";
       outcomeAria = "Team Left won.";
-    } else if (sb > sa) {
+    } else if (!isEditing && sb > sa) {
       scoreWinB = " history-score--winner";
       outcomeAria = "Team Right won.";
-    } else {
+    } else if (!isEditing) {
       outcomeAria = "Draw.";
+    } else {
+      outcomeAria = "Editing scores.";
     }
-    li.className = "history-item";
+
+    const { a: scoreHtmlA, b: scoreHtmlB } = historyScoreMarkup(
+      sa,
+      sb,
+      isEditing,
+      scoreWinA,
+      scoreWinB,
+    );
     li.setAttribute(
       "aria-label",
       `${when} ${outcomeAria} Score ${sa}–${sb}.`,
     );
-    const idxAttr = String(matchIndex);
+
+    const actionsHidden = isEditing ? " hidden" : "";
+    const editBarHtml = isEditing
+      ? `<div class="history-edit-bar" role="group" aria-label="Save or cancel editing scores">
+        <button type="button" class="history-edit-save">Save scores</button>
+        <button type="button" class="history-edit-cancel secondary">Cancel</button>
+      </div>`
+      : "";
+
     li.innerHTML = `
       <div class="history-item-head">
         <div class="history-when">${escapeHtml(when)}</div>
-        <button type="button" class="history-item-delete" data-match-index="${idxAttr}" title="Remove this match" aria-label="Remove match">
-          <svg class="history-item-delete-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 6h18" />
-            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
-            <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
-            <line x1="10" y1="11" x2="10" y2="17" />
-            <line x1="14" y1="11" x2="14" y2="17" />
-          </svg>
-        </button>
+        <div class="history-item-actions${actionsHidden}">
+          <button type="button" class="history-item-edit" aria-label="Edit scores" title="Edit scores">
+            <svg class="history-item-edit-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" />
+              <path d="m15 5 4 4" />
+            </svg>
+          </button>
+          <button type="button" class="history-item-delete" title="Remove this match" aria-label="Remove match">
+            <svg class="history-item-delete-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M3 6h18" />
+              <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
+              <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+              <line x1="10" y1="11" x2="10" y2="17" />
+              <line x1="14" y1="11" x2="14" y2="17" />
+            </svg>
+          </button>
+        </div>
       </div>
       <div class="history-row">
         <div class="history-side history-side-a">
           <span class="history-side-label">Team Left</span>
           <span class="history-players">${sideA}</span>
-          <span class="history-score${scoreWinA}">${sa}</span>
+          ${scoreHtmlA}
         </div>
         <span class="history-vs" aria-hidden="true">vs</span>
         <div class="history-side history-side-b">
           <span class="history-side-label">Team Right</span>
           <span class="history-players">${sideB}</span>
-          <span class="history-score${scoreWinB}">${sb}</span>
+          ${scoreHtmlB}
         </div>
       </div>
+      ${editBarHtml}
     `;
     ul.appendChild(li);
+
+    if (isEditing) {
+      const inp = li.querySelector(
+        '.history-score-input[data-score-side="left"]',
+      );
+      if (inp) {
+        requestAnimationFrame(() => {
+          inp.focus();
+          inp.select();
+        });
+      }
+    }
   }
+}
+
+function rerenderHistoryOnly() {
+  const sess = window.__session;
+  if (!sess) return;
+  renderHistory(sess.matches, sess.players, sess);
 }
 
 $("#add-player").addEventListener("click", () => {
@@ -815,19 +1030,83 @@ $("#btn-reshuffle").addEventListener("click", async () => {
 });
 
 $("#history").addEventListener("click", async (e) => {
-  const btn = e.target.closest(".history-item-delete");
-  if (!btn) return;
   const sess = window.__session;
   if (!sess?.id) return;
-  const idxRaw = btn.getAttribute("data-match-index");
-  if (idxRaw == null || idxRaw === "") return;
-  const matchIndex = Number.parseInt(idxRaw, 10);
+
+  const cancelBtn = e.target.closest(".history-edit-cancel");
+  if (cancelBtn) {
+    window.__historyEditIdx = null;
+    rerenderHistoryOnly();
+    return;
+  }
+
+  const saveBtn = e.target.closest(".history-edit-save");
+  if (saveBtn) {
+    const item = saveBtn.closest(".history-item");
+    if (!item?.dataset.matchIndex) return;
+    const matchIndex = Number.parseInt(item.dataset.matchIndex, 10);
+    if (!Number.isInteger(matchIndex) || matchIndex < 0) return;
+
+    const leftInp = item.querySelector(
+      '.history-score-input[data-score-side="left"]',
+    );
+    const rightInp = item.querySelector(
+      '.history-score-input[data-score-side="right"]',
+    );
+    if (!leftInp || !rightInp) return;
+
+    const score_a = Number.parseInt(String(leftInp.value).trim(), 10);
+    const score_b = Number.parseInt(String(rightInp.value).trim(), 10);
+    if (Number.isNaN(score_a) || Number.isNaN(score_b)) {
+      toast("Enter scores for Team Left and Team Right");
+      return;
+    }
+    if (score_a < 0 || score_b < 0) {
+      toast("Scores must be zero or positive");
+      return;
+    }
+
+    saveBtn.disabled = true;
+    try {
+      const updated = await api(
+        `/api/sessions/${sess.id}/matches/${matchIndex}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({ score_a, score_b }),
+        },
+      );
+      refreshSessionView(updated);
+      toast("Scores updated");
+    } catch (err) {
+      toast(err.message);
+    } finally {
+      saveBtn.disabled = false;
+    }
+    return;
+  }
+
+  const editBtn = e.target.closest(".history-item-edit");
+  if (editBtn) {
+    const item = editBtn.closest(".history-item");
+    if (!item?.dataset.matchIndex) return;
+    const matchIndex = Number.parseInt(item.dataset.matchIndex, 10);
+    if (!Number.isInteger(matchIndex) || matchIndex < 0) return;
+    window.__historyEditIdx = matchIndex;
+    rerenderHistoryOnly();
+    return;
+  }
+
+  const delBtn = e.target.closest(".history-item-delete");
+  if (!delBtn) return;
+  const item = delBtn.closest(".history-item");
+  if (!item?.dataset.matchIndex) return;
+  const matchIndex = Number.parseInt(item.dataset.matchIndex, 10);
   if (!Number.isInteger(matchIndex) || matchIndex < 0) return;
   const ok = window.confirm(
     "Remove this match from history? Standings will update to match what’s left.",
   );
   if (!ok) return;
-  btn.disabled = true;
+  delBtn.disabled = true;
   try {
     const updated = await api(
       `/api/sessions/${sess.id}/matches/${matchIndex}`,
@@ -838,7 +1117,7 @@ $("#history").addEventListener("click", async (e) => {
   } catch (err) {
     toast(err.message);
   } finally {
-    btn.disabled = false;
+    delBtn.disabled = false;
   }
 });
 
@@ -865,6 +1144,7 @@ $("#btn-reset-scores").addEventListener("click", async () => {
 function goHome() {
   window.__session = null;
   window.__suggestion = null;
+  window.__historyEditIdx = null;
   $("#view-session").classList.add("hidden");
   $("#view-loading").classList.add("hidden");
   $("#view-not-found")?.classList.add("hidden");
@@ -921,21 +1201,42 @@ $("#copy-link").addEventListener("click", async () => {
 wireStandingsTabs();
 wireSessionSetupTabs();
 
+$("#session-setup-panel-config")?.addEventListener("change", (e) => {
+  const t = e.target;
+  if (
+    t?.id === "config-hide-inactive-standings" ||
+    t?.id === "config-hide-inactive-matches"
+  ) {
+    t.setAttribute("aria-checked", t.checked ? "true" : "false");
+  }
+});
+
 $("#form-session-config")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const sess = window.__session;
   if (!sess) return;
-  const fd = new FormData(e.target);
-  const raw = fd.get("sit_out_score");
-  const sit = Number(raw);
-  if (!Number.isFinite(sit) || sit < 0) {
-    toast("Enter a valid non‑negative multiplier (k)");
+  const raw = String($("#config-sit-out-score")?.value ?? "").trim();
+  if (raw === "") {
+    toast("Enter a value for k (0–1000)");
     return;
   }
+  const sit = Number(raw);
+  if (!Number.isFinite(sit) || sit < 0 || sit > 1000) {
+    toast("k must be a number from 0 to 1000");
+    return;
+  }
+  const standingsIn = $("#config-hide-inactive-standings");
+  const matchesIn = $("#config-hide-inactive-matches");
   try {
     const updated = await api(`/api/sessions/${sess.id}/config`, {
       method: "PATCH",
-      body: JSON.stringify({ sit_out_score: sit }),
+      body: JSON.stringify({
+        sit_out_score: sit,
+        hide_inactive_from_standings:
+          standingsIn?.checked ?? true,
+        hide_inactive_from_matches:
+          matchesIn?.checked ?? true,
+      }),
     });
     refreshSessionView(updated);
     toast("Config saved");

@@ -420,9 +420,16 @@ button.secondary {
   overflow-wrap: anywhere;
 }
 
+.history-item-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+}
+
+.history-item-edit,
 .history-item-delete {
   flex-shrink: 0;
-  align-self: center;
   margin: 0;
   padding: 0;
   width: 2rem;
@@ -432,11 +439,24 @@ button.secondary {
   justify-content: center;
   border: none;
   border-radius: 10px;
-  background: rgb(254 226 226 / 0.55);
-  color: #b91c1c;
   cursor: pointer;
   transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease,
     transform 0.12s ease;
+}
+
+.history-item-edit {
+  background: rgb(241 245 249 / 0.95);
+  color: #475569;
+}
+
+.history-item-edit:hover {
+  background: #e2e8f0;
+  color: #1e293b;
+}
+
+.history-item-delete {
+  background: rgb(254 226 226 / 0.55);
+  color: #b91c1c;
 }
 
 .history-item-delete:hover {
@@ -444,15 +464,18 @@ button.secondary {
   color: #991b1b;
 }
 
+.history-item-edit:active,
 .history-item-delete:active {
   transform: scale(0.96);
 }
 
+.history-item-edit-icon,
 .history-item-delete-icon {
   display: block;
   pointer-events: none;
 }
 
+.history-item-edit:focus-visible,
 .history-item-delete:focus-visible {
   opacity: 1;
   outline: 2px solid #94a3b8;
@@ -460,20 +483,62 @@ button.secondary {
 }
 
 @media (hover: hover) {
-  .history-item-delete {
+  .history-item-actions .history-item-edit,
+  .history-item-actions .history-item-delete {
     opacity: 0;
   }
 
-  .history-item:hover .history-item-delete,
-  .history-item:focus-within .history-item-delete {
+  .history-item:hover .history-item-actions .history-item-edit,
+  .history-item:hover .history-item-actions .history-item-delete,
+  .history-item:focus-within .history-item-actions .history-item-edit,
+  .history-item:focus-within .history-item-actions .history-item-delete {
     opacity: 1;
   }
 }
 
 @media (hover: none) {
-  .history-item-delete {
-    opacity: 0.68;
+  .history-item-actions .history-item-edit,
+  .history-item-actions .history-item-delete {
+    opacity: 0.72;
   }
+}
+
+.history-score-input {
+  box-sizing: border-box;
+  width: 3.15rem;
+  max-width: 5rem;
+  margin: 0;
+  padding: 0.38rem 0.35rem;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  line-height: 1.25;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}
+
+.history-edit-bar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 0.5rem 0.65rem;
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid #f1f5f9;
+}
+
+.history-edit-bar button {
+  width: auto;
+  margin-top: 0;
+  flex: 0 0 auto;
+  min-height: 0;
+  padding: 0.45rem 0.95rem;
+  font-size: 0.875rem;
 }
 
 .history-row {
@@ -709,6 +774,107 @@ th {
 
 .session-setup-card button {
   margin-top: 0.85rem;
+}
+
+.session-setup-card input[type="checkbox"] {
+  width: auto;
+}
+
+.session-config-toggles {
+  margin-top: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.session-config-switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  cursor: pointer;
+}
+
+.session-config-switch-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #334155;
+  line-height: 1.35;
+}
+
+.session-config-switch-visual {
+  position: relative;
+  flex-shrink: 0;
+  height: 1.48rem;
+  width: 2.95rem;
+}
+
+.session-config-switch-input {
+  appearance: none;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+  z-index: 2;
+}
+
+.session-config-switch-input:focus-visible ~ .session-config-switch-track {
+  outline: 2px solid #16a34a;
+  outline-offset: 3px;
+}
+
+.session-config-switch-track {
+  pointer-events: none;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 999px;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  position: relative;
+  transition:
+    background 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.session-config-switch-track::after {
+  content: "";
+  position: absolute;
+  width: 1.06rem;
+  height: 1.06rem;
+  border-radius: 50%;
+  background: #fff;
+  top: 50%;
+  left: 3px;
+  transform: translateY(-50%);
+  box-shadow: 0 1px 3px rgb(15 23 42 / 18%);
+  transition:
+    transform 0.18s ease,
+    left 0.18s ease;
+}
+
+.session-config-switch-visual:has(.session-config-switch-input:checked)
+  .session-config-switch-track {
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.session-config-switch-visual:has(.session-config-switch-input:checked)
+  .session-config-switch-track::after {
+  left: calc(100% - 1.06rem - 3px);
+}
+
+.session-config-switch-input:disabled {
+  cursor: wait;
+}
+
+.session-config-switch-input:disabled ~ .session-config-switch-track {
+  opacity: 0.55;
 }
 
 .session-setup-player-count {
