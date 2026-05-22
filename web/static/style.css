@@ -387,11 +387,61 @@ button.secondary {
 }
 
 .history-item {
+  position: relative;
+  --history-r: 14px;
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border-radius: var(--history-r);
   padding: 0.95rem 1.05rem;
   box-shadow: 0 1px 3px rgb(15 23 42 / 8%);
+}
+
+/* Top-corner wedge: gradient + matching radius aligns outer arc with card */
+.history-item--win-left {
+  padding-left: calc(1.05rem + 14px);
+}
+
+.history-item--win-right {
+  padding-right: calc(1.05rem + 14px);
+}
+
+.history-item--win-left::before,
+.history-item--win-right::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 26px;
+  height: 26px;
+  pointer-events: none;
+}
+
+.history-item--win-left::before {
+  left: 0;
+  border-top-left-radius: var(--history-r);
+  background: linear-gradient(
+    to bottom right,
+    #22c55e 0%,
+    #22c55e 51%,
+    transparent 51%
+  );
+}
+
+.history-item--win-right::before {
+  right: 0;
+  left: auto;
+  border-top-right-radius: var(--history-r);
+  background: linear-gradient(
+    to bottom left,
+    #22c55e 0%,
+    #22c55e 51%,
+    transparent 51%
+  );
+}
+
+.history-item--win-left > *,
+.history-item--win-right > * {
+  position: relative;
+  z-index: 1;
 }
 
 .history-when {
@@ -422,6 +472,7 @@ button.secondary {
   justify-content: flex-start;
   gap: 0.35rem 0.45rem;
   text-align: center;
+  padding: 0.25rem 0.35rem;
 }
 
 .history-players {
@@ -440,6 +491,7 @@ button.secondary {
 
 .history-vs {
   flex: 0 0 auto;
+  align-self: center;
   font-size: 0.7rem;
   font-weight: 800;
   text-transform: uppercase;

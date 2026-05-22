@@ -645,23 +645,40 @@ function renderHistory(matches, players) {
   const rev = [...matches].reverse();
   for (const m of rev) {
     const li = document.createElement("li");
-    li.className = "history-item";
     const when = formatHistoryWhenPlayed(m.played_at);
     const sideA = formatHistoryPartners(m.team_a_ids, nameMap);
     const sideB = formatHistoryPartners(m.team_b_ids, nameMap);
+    const sa = Number(m.score_a) || 0;
+    const sb = Number(m.score_b) || 0;
+    let outcomeAria = "";
+    let itemMods = "";
+    if (sa > sb) {
+      itemMods = " history-item--win-left";
+      outcomeAria = "Team Left won.";
+    } else if (sb > sa) {
+      itemMods = " history-item--win-right";
+      outcomeAria = "Team Right won.";
+    } else {
+      outcomeAria = "Draw.";
+    }
+    li.className = `history-item${itemMods}`;
+    li.setAttribute(
+      "aria-label",
+      `${when} ${outcomeAria} Score ${sa}–${sb}.`,
+    );
     li.innerHTML = `
       <div class="history-when">${escapeHtml(when)}</div>
       <div class="history-row">
         <div class="history-side history-side-a">
           <span class="history-side-label">Team Left</span>
           <span class="history-players">${sideA}</span>
-          <span class="history-score">(${m.score_a})</span>
+          <span class="history-score">${sa}</span>
         </div>
         <span class="history-vs" aria-hidden="true">vs</span>
         <div class="history-side history-side-b">
           <span class="history-side-label">Team Right</span>
           <span class="history-players">${sideB}</span>
-          <span class="history-score">(${m.score_b})</span>
+          <span class="history-score">${sb}</span>
         </div>
       </div>
     `;
