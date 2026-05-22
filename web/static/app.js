@@ -642,8 +642,9 @@ function renderHistory(matches, players) {
   const ul = $("#history");
   ul.innerHTML = "";
   const nameMap = idToNameMap(players);
-  const rev = [...matches].reverse();
-  for (const m of rev) {
+  const list = matches || [];
+  for (let matchIndex = list.length - 1; matchIndex >= 0; matchIndex--) {
+    const m = list[matchIndex];
     const li = document.createElement("li");
     const when = formatHistoryWhenPlayed(m.played_at);
     const sideA = formatHistoryPartners(m.team_a_ids, nameMap);
@@ -667,8 +668,20 @@ function renderHistory(matches, players) {
       "aria-label",
       `${when} ${outcomeAria} Score ${sa}–${sb}.`,
     );
+    const idxAttr = String(matchIndex);
     li.innerHTML = `
-      <div class="history-when">${escapeHtml(when)}</div>
+      <div class="history-item-head">
+        <div class="history-when">${escapeHtml(when)}</div>
+        <button type="button" class="history-item-delete" data-match-index="${idxAttr}" title="Remove this match" aria-label="Remove match">
+          <svg class="history-item-delete-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M3 6h18" />
+            <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6" />
+            <path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2" />
+            <line x1="10" y1="11" x2="10" y2="17" />
+            <line x1="14" y1="11" x2="14" y2="17" />
+          </svg>
+        </button>
+      </div>
       <div class="history-row">
         <div class="history-side history-side-a">
           <span class="history-side-label">Team Left</span>
@@ -798,6 +811,34 @@ $("#btn-reshuffle").addEventListener("click", async () => {
     updateRecordMatchLabels(sess);
   } finally {
     setLineupControlsBusy(false);
+  }
+});
+
+$("#history").addEventListener("click", async (e) => {
+  const btn = e.target.closest(".history-item-delete");
+  if (!btn) return;
+  const sess = window.__session;
+  if (!sess?.id) return;
+  const idxRaw = btn.getAttribute("data-match-index");
+  if (idxRaw == null || idxRaw === "") return;
+  const matchIndex = Number.parseInt(idxRaw, 10);
+  if (!Number.isInteger(matchIndex) || matchIndex < 0) return;
+  const ok = window.confirm(
+    "Remove this match from history? Standings will update to match what’s left.",
+  );
+  if (!ok) return;
+  btn.disabled = true;
+  try {
+    const updated = await api(
+      `/api/sessions/${sess.id}/matches/${matchIndex}`,
+      { method: "DELETE" },
+    );
+    refreshSessionView(updated);
+    toast("Match removed");
+  } catch (err) {
+    toast(err.message);
+  } finally {
+    btn.disabled = false;
   }
 });
 

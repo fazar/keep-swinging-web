@@ -54,6 +54,7 @@ Environment variables (see `.env.example`):
 | `GET` | `/api/health` | `200` + `{"ok":true}` when Redis is reachable (use to detect cold start / readiness) |
 | `GET` | `/api/sessions/{id}` | Full session JSON; each player may include `inactive: true` (**away**: out of matchup rotation, counts & history kept) |
 | `POST` | `/api/sessions/{id}/matches` | Body: `team_a_ids`, `team_b_ids` (2 each), `score_a`, `score_b` — rejects inactive IDs |
+| `DELETE` | `/api/sessions/{id}/matches/{match_index}` | Removes one recorded match **`match_index`** in `matches` array order (`0` = oldest …); rewinds standings and refreshes lineup |
 | `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"exclude_player_ids":["..."]}` (`exclude` resting only applies to players **in shuffle**) |
 | `POST` | `/api/sessions/{id}/reset` | Clears match history and zeros standings; keeps roster (including inactive flags); same player ids/names |
 | `PATCH` | `/api/sessions/{id}/config` | Body: `{"sit_out_score":3}` — parity multiplier **k** (0–1000) saved on the session; omit on GET ⇒ default **by sport**: tennis **2**, padel **10** |

@@ -387,6 +387,7 @@ button.secondary {
 }
 
 .history-item {
+  position: relative;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 14px;
@@ -394,14 +395,85 @@ button.secondary {
   box-shadow: 0 1px 3px rgb(15 23 42 / 8%);
 }
 
-.history-when {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  color: #64748b;
-  letter-spacing: 0.03em;
+.history-item-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.55rem 0.65rem;
   margin: 0 0 0.75rem;
-  padding-bottom: 0.7rem;
+  padding-bottom: 0.6rem;
   border-bottom: 1px solid #f1f5f9;
+}
+
+.history-when {
+  flex: 1;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: #334155;
+  letter-spacing: 0.025em;
+  margin: 0;
+  padding: 0;
+  border-bottom: none;
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-item-delete {
+  flex-shrink: 0;
+  align-self: center;
+  margin: 0;
+  padding: 0;
+  width: 2rem;
+  height: 2rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 10px;
+  background: rgb(254 226 226 / 0.55);
+  color: #b91c1c;
+  cursor: pointer;
+  transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease,
+    transform 0.12s ease;
+}
+
+.history-item-delete:hover {
+  background: rgb(254 202 202 / 0.95);
+  color: #991b1b;
+}
+
+.history-item-delete:active {
+  transform: scale(0.96);
+}
+
+.history-item-delete-icon {
+  display: block;
+  pointer-events: none;
+}
+
+.history-item-delete:focus-visible {
+  opacity: 1;
+  outline: 2px solid #94a3b8;
+  outline-offset: 2px;
+}
+
+@media (hover: hover) {
+  .history-item-delete {
+    opacity: 0;
+  }
+
+  .history-item:hover .history-item-delete,
+  .history-item:focus-within .history-item-delete {
+    opacity: 1;
+  }
+}
+
+@media (hover: none) {
+  .history-item-delete {
+    opacity: 0.68;
+  }
 }
 
 .history-row {

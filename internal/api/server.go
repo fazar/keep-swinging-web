@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"math"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +31,7 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
 	mux.HandleFunc("GET /api/sessions/{id}", s.handleGetSession)
 	mux.HandleFunc("POST /api/sessions/{id}/matches", s.handleRecordMatch)
+	mux.HandleFunc("DELETE /api/sessions/{id}/matches/{match_index}", s.handleDeleteMatch)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
 	mux.HandleFunc("POST /api/sessions/{id}/reset", s.handleResetScores)
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", s.handlePatchSessionConfig)
@@ -189,6 +192,53 @@ func (s *Server) handleRecordMatch(w http.ResponseWriter, r *http.Request) {
 	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
 	if err != nil {
 		s.Logger.Error("pick suggestion after match", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
+		return
+	}
+	sess.Suggested = sug
+	sess.SuggestionKey = key
+
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+func (s *Server) handleDeleteMatch(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	idxStr := strings.TrimSpace(r.PathValue("match_index"))
+	idx, errConv := strconv.Atoi(idxStr)
+	if errConv != nil || idx < 0 {
+		writeError(w, http.StatusBadRequest, "invalid match index")
+		return
+	}
+
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, id, w)
+	if sess == nil {
+		return
+	}
+	if err != nil {
+		return
+	}
+	if idx >= len(sess.Matches) {
+		writeError(w, http.StatusBadRequest, "match index out of range")
+		return
+	}
+
+	rec := sess.Matches[idx]
+	revertMatchResult(sess, rec)
+	sess.Matches = slices.Delete(sess.Matches, idx, idx+1)
+
+	sug, key, errPick := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	if errPick != nil {
+		s.Logger.Error("pick suggestion after delete match", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
 		return
 	}
@@ -501,6 +551,52 @@ func (s *Server) loadSession(ctx context.Context, id string, w http.ResponseWrit
 		return nil, err
 	}
 	return sess, nil
+}
+
+func revertMatchResult(sess *session.Session, rec session.RecordedMatch) {
+	idx := playerIndex(sess)
+	all := append(append([]string{}, rec.TeamAIDs...), rec.TeamBIDs...)
+	for _, pid := range all {
+		p := idx[pid]
+		p.GamesPlayed--
+		idx[pid] = p
+	}
+	switch {
+	case rec.ScoreA > rec.ScoreB:
+		for _, pid := range rec.TeamAIDs {
+			p := idx[pid]
+			p.Wins--
+			idx[pid] = p
+		}
+		for _, pid := range rec.TeamBIDs {
+			p := idx[pid]
+			p.Losses--
+			idx[pid] = p
+		}
+	case rec.ScoreB > rec.ScoreA:
+		for _, pid := range rec.TeamBIDs {
+			p := idx[pid]
+			p.Wins--
+			idx[pid] = p
+		}
+		for _, pid := range rec.TeamAIDs {
+			p := idx[pid]
+			p.Losses--
+			idx[pid] = p
+		}
+	default:
+		for _, pid := range all {
+			p := idx[pid]
+			p.Draws--
+			idx[pid] = p
+		}
+	}
+	for i := range sess.Players {
+		pid := sess.Players[i].ID
+		if upd, ok := idx[pid]; ok {
+			sess.Players[i] = upd
+		}
+	}
 }
 
 func applyMatchResult(sess *session.Session, rec session.RecordedMatch) {
