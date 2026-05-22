@@ -460,6 +460,21 @@ function addCompetitionRanks(sorted, tiedFn) {
   return ranks;
 }
 
+/** Podium for 1–3, 💀 for everyone tied worst rank, 😭 otherwise. */
+function standingsRankEmoji(competitionRank, ranks) {
+  if (competitionRank === 1) return "\u{1f947}";
+  if (competitionRank === 2) return "\u{1f948}";
+  if (competitionRank === 3) return "\u{1f949}";
+  const lastRank = ranks[ranks.length - 1];
+  if (competitionRank === lastRank) return "\u{1f480}";
+  return "\u{1f62d}";
+}
+
+function standingsRankTd(competitionRank, ranks) {
+  const e = standingsRankEmoji(competitionRank, ranks);
+  return `<td class="standings-rank-cell" aria-label="Rank ${competitionRank}"><span aria-hidden="true">${e}</span></td>`;
+}
+
 function renderMatchPointStandings(matches, players, parityK, emptyHint) {
   const tb = $("#standings-scored tbody");
   if (!tb) return;
@@ -484,7 +499,7 @@ function renderMatchPointStandings(matches, players, parityK, emptyHint) {
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i];
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${ranks[i]}</td><td>${escapeHtml(r.name)}<div class="pid">${escapeHtml(r.id)}</div></td><td>${r.gp}</td><td>${r.scored}</td><td>${r.adjusted}</td>`;
+    tr.innerHTML = `${standingsRankTd(ranks[i], ranks)}<td>${escapeHtml(r.name)}<div class="pid">${escapeHtml(r.id)}</div></td><td>${r.gp}</td><td>${r.scored}</td><td>${r.adjusted}</td>`;
     tb.appendChild(tr);
   }
 }
@@ -533,7 +548,7 @@ function renderLeagueStandings(players, parityK) {
     const { p, raw, adjusted } = sorted[i];
     const tr = document.createElement("tr");
     const d = p.draws ?? 0;
-    tr.innerHTML = `<td>${ranks[i]}</td><td>${escapeHtml(p.name)}<div class="pid">${escapeHtml(p.id)}</div></td><td>${p.games_played}</td><td>${p.wins}</td><td>${d}</td><td>${p.losses}</td><td>${raw}</td><td>${adjusted}</td>`;
+    tr.innerHTML = `${standingsRankTd(ranks[i], ranks)}<td>${escapeHtml(p.name)}<div class="pid">${escapeHtml(p.id)}</div></td><td>${p.games_played}</td><td>${p.wins}</td><td>${d}</td><td>${p.losses}</td><td>${raw}</td><td>${adjusted}</td>`;
     tb.appendChild(tr);
   }
 }

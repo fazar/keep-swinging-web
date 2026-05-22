@@ -650,6 +650,17 @@ td {
   color: #475569;
 }
 
+.standings-table th:first-child {
+  text-align: center;
+}
+
+.standings-table td.standings-rank-cell {
+  text-align: center;
+  font-variant-numeric: normal;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
 .standings-table th:nth-child(2),
 .standings-table td:nth-child(2) {
   text-align: left;
