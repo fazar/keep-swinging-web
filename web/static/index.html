@@ -28,17 +28,38 @@
         aria-busy="false"
       >
         <div class="loading-card">
-          <img
-            src="/loading.png"
-            alt=""
-            class="loading-icon"
-            width="72"
-            height="72"
-            decoding="async"
-          />
+          <span
+            class="app-spinner app-spinner--lg"
+            aria-hidden="true"
+          ></span>
           <p class="loading-title" id="loading-title">Loading…</p>
           <p class="loading-hint" id="loading-hint"></p>
         </div>
+      </div>
+
+      <div
+        id="view-not-found"
+        class="panel hidden"
+        role="status"
+        aria-labelledby="nf-title"
+      >
+        <article class="not-found-card card">
+          <p class="not-found-eyebrow">Link not found</p>
+          <h2 id="nf-title" class="not-found-title">
+            This session is no longer available
+          </h2>
+          <p class="not-found-lede">
+            The session may have expired, the link might be wrong, or the host
+            cleared it. Session data is kept for a limited time, then removed
+            automatically.
+          </p>
+          <p class="not-found-hint">
+            Start a new session from the home page.
+          </p>
+          <button type="button" id="btn-not-found-home" class="cta-home-primary">
+            Go to home page
+          </button>
+        </article>
       </div>
 
       <div id="view-home" class="panel">
@@ -86,12 +107,31 @@
         <section class="session-block">
           <h2 class="section-heading">Record match</h2>
           <form id="match-form" class="card">
-            <p class="hint">Uses current suggestion teams by default.</p>
-            <label>Team A score</label>
-            <input type="number" name="score_a" min="0" step="1" />
-            <label>Team B score</label>
-            <input type="number" name="score_b" min="0" step="1" />
-            <button type="submit">Save match</button>
+            <p class="hint">
+              Uses the lineup above: left is Team Left on court, right is Team
+              Right.
+            </p>
+            <label id="match-label-left" for="match-score-left"
+              >Team Left score</label
+            >
+            <input
+              type="number"
+              id="match-score-left"
+              name="score_a"
+              min="0"
+              step="1"
+            />
+            <label id="match-label-right" for="match-score-right"
+              >Team Right score</label
+            >
+            <input
+              type="number"
+              id="match-score-right"
+              name="score_b"
+              min="0"
+              step="1"
+            />
+            <button type="submit" id="btn-save-match">Save match</button>
           </form>
         </section>
 
@@ -125,11 +165,14 @@
           </div>
           <p id="standings-hint-scored" class="hint standings-hint">
             Raw = total game points while you played (e.g. 3–1 gives your side
-            +3 each). Adj = raw + 1 for each match you sat out.
+            +3 each). Adj = raw + k × (max GP among players − your GP); only
+            from finished matches (reshuffle does not affect it). Set k under
+            Session setup (default 10 for padel, 2 for tennis if unset).
           </p>
           <p id="standings-hint-league" class="hint standings-hint hidden">
-            Raw pts = 3 per win, 1 per draw. Adj = raw + 1 for each match you
-            sat out.
+            Raw pts = 3 per win, 1 per draw. Adj = raw + k × (max GP in session −
+            your GP); from recorded results only. Set multiplier k under Session
+            setup (default 10 for padel, 2 for tennis if unset).
           </p>
           <div
             id="standings-panel-scored"
@@ -189,6 +232,99 @@
             <span class="history-reset-hint"
               >Keeps the same players; clears match history and standings.</span
             >
+          </div>
+        </section>
+
+        <section class="session-block">
+          <h2 class="section-heading">Session setup</h2>
+          <div
+            class="standings-tabs"
+            role="tablist"
+            aria-label="Session setup tabs"
+          >
+            <button
+              type="button"
+              class="standings-tab standings-tab--active"
+              id="tab-session-setup-config"
+              role="tab"
+              aria-selected="true"
+              aria-controls="session-setup-panel-config"
+            >
+              Config
+            </button>
+            <button
+              type="button"
+              class="standings-tab"
+              id="tab-session-setup-players"
+              role="tab"
+              aria-selected="false"
+              aria-controls="session-setup-panel-players"
+            >
+              Players
+            </button>
+          </div>
+          <div
+            id="session-setup-panel-config"
+            class="standings-panel"
+            role="tabpanel"
+            aria-labelledby="tab-session-setup-config"
+          >
+            <p class="hint session-setup-hint">
+              Standing &ldquo;Adj&rdquo; uses raw + k × (leader GP − your GP).
+              Increase k so players behind on games catch up faster in rankings;
+              set k to 0 to turn off parity. New sessions default to
+              <strong>2</strong> (tennis) or <strong>10</strong> (padel); sessions
+              without a saved multiplier use that same sport default.
+            </p>
+            <form id="form-session-config" class="card session-setup-card">
+              <label for="config-sit-out-score">Sit-out parity multiplier (k)</label>
+              <input
+                type="number"
+                id="config-sit-out-score"
+                name="sit_out_score"
+                step="any"
+                min="0"
+                inputmode="decimal"
+                autocomplete="off"
+                required
+              />
+              <button type="submit" id="btn-save-session-config">
+                Save config
+              </button>
+            </form>
+          </div>
+          <div
+            id="session-setup-panel-players"
+            class="standings-panel hidden"
+            role="tabpanel"
+            aria-labelledby="tab-session-setup-players"
+          >
+            <p class="hint session-setup-hint">
+              Use <strong>Remove</strong> to mark someone temporarily away—they stay in
+              history and standings but drop out of matchups until you register the
+              <strong>same name</strong> again (restore). At least four people must remain
+              in shuffle for doubles.
+            </p>
+            <p class="meta session-setup-player-count" id="session-player-count-meta"></p>
+            <ul
+              id="session-setup-player-list"
+              class="session-setup-player-list"
+              aria-label="Players in session"
+            ></ul>
+            <form id="form-add-session-player" class="card session-setup-card">
+              <label for="session-new-player-name">New player name</label>
+              <input
+                type="text"
+                id="session-new-player-name"
+                name="name"
+                autocomplete="off"
+                maxlength="120"
+              />
+              <button type="submit" id="btn-add-session-player">
+                Add player
+              </button>
+            </form>
+            <p class="hint" id="session-setup-player-hint"></p>
           </div>
         </section>
       </div>

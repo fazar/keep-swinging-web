@@ -52,16 +52,21 @@ Environment variables (see `.env.example`):
 |--------|------|-------------|
 | `POST` | `/api/sessions` | Body: `{"sport":"padel","players":["Alice",...]}` (4–16 names) |
 | `GET` | `/api/health` | `200` + `{"ok":true}` when Redis is reachable (use to detect cold start / readiness) |
-| `GET` | `/api/sessions/{id}` | Full session JSON |
-| `POST` | `/api/sessions/{id}/matches` | Body: `team_a_ids`, `team_b_ids` (2 each), `score_a`, `score_b` |
-| `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"exclude_player_ids":["..."]}` |
-| `POST` | `/api/sessions/{id}/reset` | Clears match history and zeros standings; same player ids/names | For split hosting later, enable CORS on the API (already `*` for simple cases).
+| `GET` | `/api/sessions/{id}` | Full session JSON; each player may include `inactive: true` (**away**: out of matchup rotation, counts & history kept) |
+| `POST` | `/api/sessions/{id}/matches` | Body: `team_a_ids`, `team_b_ids` (2 each), `score_a`, `score_b` — rejects inactive IDs |
+| `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"exclude_player_ids":["..."]}` (`exclude` resting only applies to players **in shuffle**) |
+| `POST` | `/api/sessions/{id}/reset` | Clears match history and zeros standings; keeps roster (including inactive flags); same player ids/names |
+| `PATCH` | `/api/sessions/{id}/config` | Body: `{"sit_out_score":3}` — parity multiplier **k** (0–1000) saved on the session; omit on GET ⇒ default **by sport**: tennis **2**, padel **10** |
+| `POST` | `/api/sessions/{id}/players` | Body: `{"name":"Ada"}` — add new player (**≤16** roster) **or**, if exactly one inactive player matches the name (**case-insensitive**), revive them (`inactive: false`); rejects duplicate active names |
+| `DELETE` | `/api/sessions/{id}/players/{player_id}` | Mark player **inactive** (**away from shuffle**); need **>4** shuffle-active afterwards; preserves history / standings IDs |
+
+For split hosting later, enable CORS on the API (already `*` for simple cases).
 
 ## Scheduling
 
 - **Fairness:** Among valid lineups, prefer players with fewer total games played on court.
-- **Partner rotation:** We avoid pairing two players together again until **each** has partnered **every other person** in the session at least once (using saved match history). If that leaves no legal lineup for a pick, we temporarily relax and use fairness only.
-- **Standings:** **Match points** tab: raw total = sum of your side’s game scores in each match you played; **adj** adds +1 per match you sat out. **League** tab: raw pts = 3×wins + 1×draws; **adj** adds +1 per sit-out. Rank uses **adj** first, with competition-style ties.
+- **Partner rotation:** We avoid pairing two players together again until **each** has partnered **every other shuffle-active session member** at least once (using saved match history; players marked inactive/away don’t count). If that leaves no legal lineup for a pick, we temporarily relax and use fairness only.
+- **Standings:** **Match points** tab: raw total = sum of your side’s game scores in each match you played; **adj** = raw + **k** × (maximum games played in the session − your GP), from finished matches only (reshuffling the suggested lineup doesn’t change it); **k** is `sit_out_score` on the session, default **2** for tennis and **10** for padel when unset. **League** tab uses the same GP-based adjustment on top of raw pts (3×wins + 1×draws). Rank uses **adj** first, with competition-style ties.
 
 Implementation: `internal/scheduler/doubles.go`.
 

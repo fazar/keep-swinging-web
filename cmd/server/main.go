@@ -116,7 +116,7 @@ func corsMiddleware(allow []string, next http.Handler) http.Handler {
 		}
 		// No Origin header (e.g. curl, same-origin server): proceed without ACAO.
 
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)

@@ -80,6 +80,30 @@ func TestPickSuggestion_excludePlayer(t *testing.T) {
 	}
 }
 
+func TestPickSuggestion_ignoresInactive(t *testing.T) {
+	players := []session.Player{
+		{ID: "a", Name: "A"},
+		{ID: "b", Name: "B"},
+		{ID: "c", Name: "C"},
+		{ID: "d", Name: "D"},
+		{ID: "away", Name: "Away", Inactive: true},
+	}
+	sug, _, err := PickSuggestion(players, nil, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, p := range append(sug.TeamA, sug.TeamB...) {
+		if p.ID == "away" {
+			t.Fatal("inactive player must not appear in suggestion")
+		}
+		seen[p.ID] = true
+	}
+	if len(seen) != 4 {
+		t.Fatalf("expected 4 lineup players, got %d", len(seen))
+	}
+}
+
 func pairNorm(team []session.Player) string {
 	a, b := team[0].ID, team[1].ID
 	if a > b {

@@ -85,6 +85,17 @@ func filterPlayers(players []session.Player, excludeIDs map[string]bool) []sessi
 	return out
 }
 
+// activeShufflePlayers are session members who participate in matchup selection (not inactive / away).
+func activeShufflePlayers(players []session.Player) []session.Player {
+	var out []session.Player
+	for _, p := range players {
+		if !p.Inactive {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 func playerByID(players []session.Player) map[string]session.Player {
 	m := make(map[string]session.Player, len(players))
 	for _, p := range players {
@@ -179,7 +190,8 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, e
 	for _, id := range excludePlayerIDs {
 		exSet[id] = true
 	}
-	eligible := filterPlayers(players, exSet)
+	activePool := activeShufflePlayers(players)
+	eligible := filterPlayers(activePool, exSet)
 	if len(eligible) < 4 {
 		return nil, "", fmt.Errorf("%w: need at least 4 eligible players", ErrNoLineup)
 	}
@@ -189,7 +201,7 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, e
 	}
 	sort.Strings(ids)
 
-	roster := sortedRosterIDs(players)
+	roster := sortedRosterIDs(activePool)
 	games := gamesMap(players)
 	byID := playerByID(players)
 

@@ -164,11 +164,65 @@ button.secondary {
   font-size: 0.95rem;
 }
 
+/* Shared link expired, typo, or never existed */
+.not-found-card.card {
+  max-width: 23rem;
+  margin-inline: auto;
+  padding: 1.85rem 1.35rem 1.7rem;
+  text-align: center;
+  border-radius: 16px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 10px 36px rgb(15 23 42 / 7%);
+}
+
+.not-found-card .not-found-eyebrow {
+  margin: 0 0 0.6rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.11em;
+  color: #94a3b8;
+}
+
+.not-found-title {
+  margin: 0 0 1rem;
+  font-size: 1.28rem;
+  font-weight: 800;
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+  color: #0f172a;
+}
+
+.not-found-lede {
+  margin: 0 0 1rem;
+  font-size: 0.94rem;
+  line-height: 1.62;
+  color: #475569;
+}
+
+.not-found-hint {
+  margin: 0 0 1rem;
+  font-size: 0.88rem;
+  line-height: 1.52;
+  color: #64748b;
+}
+
+.not-found-card .cta-home-primary {
+  margin-top: 0.35rem;
+  width: 100%;
+}
+
 .card {
   background: #fff;
   border-radius: 12px;
   padding: 1rem;
   border: 1px solid #e2e8f0;
+}
+
+/* Suggested doubles panel: keeps loading state flush with card surface */
+#suggestion.card {
+  overflow: hidden;
+  background-color: #fff;
 }
 
 .team-block {
@@ -185,6 +239,63 @@ button.secondary {
   letter-spacing: 0.04em;
   color: #64748b;
   margin-bottom: 0.35rem;
+}
+
+.suggestion-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 0.65rem;
+  min-height: 5.75rem;
+  margin: -1rem;
+  padding: 1.5rem 1rem;
+  background-color: #fff;
+}
+
+/* Shared spinner (replaces PNG); sizes via modifiers */
+.app-spinner {
+  box-sizing: border-box;
+  display: block;
+  flex-shrink: 0;
+  margin-inline: auto;
+  border-radius: 50%;
+  border-style: solid;
+  border-color: #e8eef4;
+  border-top-color: #16a34a;
+  animation: spin 0.95s linear infinite;
+}
+
+.app-spinner--md {
+  width: 3rem;
+  height: 3rem;
+  border-width: 4px;
+}
+
+.app-spinner--lg {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-width: 5px;
+}
+
+.suggestion-loading-text {
+  margin: 0;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #475569;
+}
+
+.history-side-label {
+  display: block;
+  width: 100%;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #94a3b8;
+  margin: 0 0 0.1rem;
+  text-align: center;
 }
 
 .hint {
@@ -305,9 +416,10 @@ button.secondary {
   flex: 1 1 38%;
   min-width: 7.5rem;
   display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: center;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
   gap: 0.35rem 0.45rem;
   text-align: center;
 }
@@ -414,19 +526,10 @@ th {
 .loading-card {
   text-align: center;
   padding: 2rem 1rem 1.5rem;
-  /*background: linear-gradient(165deg, #fff 0%, #f8fafc 100%);*/
+  background: linear-gradient(180deg, #fff 0%, #f8fafc 100%);
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   box-shadow: 0 4px 24px rgb(15 23 42 / 6%);
-}
-
-.loading-icon {
-  display: block;
-  width: 4.5rem;
-  height: 4.5rem;
-  margin-inline: auto;
-  object-fit: contain;
-  animation: spin 0.95s linear infinite;
 }
 
 .loading-title {
@@ -506,4 +609,89 @@ th {
   border-radius: 999px;
   font-size: 0.9rem;
   z-index: 10;
+}
+
+/* Session setup — parity multiplier + roster */
+.session-setup-hint {
+  margin-bottom: 0.75rem;
+}
+
+.session-setup-card {
+  margin-top: 0.25rem;
+}
+
+.session-setup-card button {
+  margin-top: 0.85rem;
+}
+
+.session-setup-player-count {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+}
+
+.session-setup-player-list {
+  list-style: none;
+  margin: 0 0 0.85rem;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.session-setup-player-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.session-setup-player-item--inactive {
+  background: #f8fafc;
+}
+
+.session-setup-player-item:last-child {
+  border-bottom: none;
+}
+
+.session-setup-player-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.session-setup-player-name {
+  font-weight: 600;
+}
+
+.session-setup-player-main .pid {
+  display: block;
+  font-size: 0.72rem;
+  color: #94a3b8;
+  font-family: ui-monospace, monospace;
+  word-break: break-all;
+  margin-top: 0.2rem;
+  text-align: left;
+  max-width: none;
+}
+
+.session-setup-player-action {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.session-setup-away {
+  font-size: 0.8rem;
+  color: #64748b;
+  line-height: 1.35;
+  display: block;
+}
+
+button.session-remove-player {
+  margin-top: 0;
+  width: auto;
+  padding: 0.45rem 0.65rem;
+  font-size: 0.85rem;
 }

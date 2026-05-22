@@ -35,6 +35,27 @@ function toast(msg) {
   toast._tid = setTimeout(() => t.classList.add("hidden"), 2200);
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Keep suggestion loading visible at least this long (fast APIs otherwise flash). */
+const LINEUP_ACTION_MIN_MS = 500;
+
+async function withMinDelay(ms, fn) {
+  const t0 = performance.now();
+  try {
+    const result = await fn();
+    const left = ms - (performance.now() - t0);
+    if (left > 0) await delay(left);
+    return result;
+  } catch (err) {
+    const left = ms - (performance.now() - t0);
+    if (left > 0) await delay(left);
+    throw err;
+  }
+}
+
 async function api(path, opts = {}) {
   const res = await fetch(apiUrl(path), {
     headers: { "Content-Type": "application/json", ...(opts.headers || {}) },
@@ -48,8 +69,13 @@ async function api(path, opts = {}) {
     /* ignore */
   }
   if (!res.ok) {
-    const err = (data && data.error) || text || res.statusText;
-    throw new Error(err);
+    const msg =
+      (data && typeof data.error === "string" && data.error) ||
+      text ||
+      res.statusText;
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
   }
   return data;
 }
@@ -156,12 +182,109 @@ function idToNameMap(players) {
   return m;
 }
 
+const MAX_PLAYERS_SESSION = 16;
+
+function shuffleActivePlayers(players) {
+  return (players || []).filter((p) => !p.inactive);
+}
+
+function namesEquivalent(a, b) {
+  return (
+    String(a ?? "")
+      .trim()
+      .toLowerCase() ===
+    String(b ?? "")
+      .trim()
+      .toLowerCase()
+  );
+}
+
+/** Default parity multiplier k by sport when sit_out_score is not stored yet. */
+function defaultSitOutScoreForSport(sport) {
+  const s = String(sport ?? "").toLowerCase();
+  if (s === "padel") return 10;
+  if (s === "tennis") return 2;
+  return 2;
+}
+
+/** Session parity multiplier k (Adj includes k × GP gap vs leader). */
+function effectiveSitOutScore(sess) {
+  if (!sess) return defaultSitOutScoreForSport("");
+  if (sess.sit_out_score != null) {
+    const x = Number(sess.sit_out_score);
+    if (!Number.isFinite(x) || x < 0) {
+      return defaultSitOutScoreForSport(sess.sport);
+    }
+    return x;
+  }
+  return defaultSitOutScoreForSport(sess.sport);
+}
+
+function doublesNamesParen(players) {
+  if (!players || !players.length) return "";
+  return players.map((p) => (p.name || "").trim() || "?").join(" · ");
+}
+
+function updateRecordMatchLabels(sess) {
+  const leftLbl = $("#match-label-left");
+  const rightLbl = $("#match-label-right");
+  if (!leftLbl || !rightLbl) return;
+  const sug = sess?.suggested;
+  if (!sug?.team_a?.length || !sug?.team_b?.length) {
+    leftLbl.textContent = "Team Left score";
+    rightLbl.textContent = "Team Right score";
+    return;
+  }
+  leftLbl.textContent = `Team Left (${doublesNamesParen(sug.team_a)})`;
+  rightLbl.textContent = `Team Right (${doublesNamesParen(sug.team_b)})`;
+}
+
+function showSuggestionLoading(message) {
+  const el = $("#suggestion");
+  if (!el) return;
+  el.setAttribute("aria-busy", "true");
+  const msg = escapeHtml(message);
+  el.innerHTML = `
+    <div class="suggestion-loading" role="status" aria-live="polite">
+      <span class="app-spinner app-spinner--md" aria-hidden="true"></span>
+      <p class="suggestion-loading-text">${msg}</p>
+    </div>
+  `;
+}
+
+function setLineupControlsBusy(busy) {
+  const reshuffle = $("#btn-reshuffle");
+  const saveMatch = $("#btn-save-match");
+  const form = $("#match-form");
+  if (reshuffle) reshuffle.disabled = !!busy;
+  if (saveMatch) saveMatch.disabled = !!busy;
+  if (form) {
+    for (const inp of form.querySelectorAll('input[type="number"]')) {
+      inp.disabled = !!busy;
+    }
+  }
+}
+
+function refreshSessionView(sess) {
+  window.__session = sess;
+  $("#session-meta").textContent =
+    `${String(sess.sport).toUpperCase()} · Session ${sess.id}`;
+  const k = effectiveSitOutScore(sess);
+  renderStandings(sess, k);
+  renderSuggestion(sess);
+  updateRecordMatchLabels(sess);
+  renderHistory(sess.matches, sess.players);
+  fillRestingPlayerSelect(sess.players);
+  renderSessionSetup(sess);
+  setLineupControlsBusy(false);
+}
+
 function fillRestingPlayerSelect(players) {
   const sel = document.getElementById("resting-player");
   if (!sel) return;
   const prev = sel.value;
   sel.innerHTML = '<option value="">— None —</option>';
-  const sorted = [...(players || [])].sort((a, b) =>
+  const sorted = [...shuffleActivePlayers(players)].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
   for (const p of sorted) {
@@ -178,7 +301,7 @@ function fillRestingPlayerSelect(players) {
 }
 
 /** Per-player totals: each game adds the team's score to every player on that team. */
-function aggregatePlayerMatchPoints(matches, players) {
+function aggregatePlayerMatchPoints(matches, players, parityK) {
   const rows = players.map((p) => ({
     id: p.id,
     name: p.name,
@@ -207,10 +330,13 @@ function aggregatePlayerMatchPoints(matches, players) {
     }
   }
 
-  const nMatch = (matches || []).length;
+  const maxGp = rows.length
+    ? Math.max(...rows.map((r) => r.gp))
+    : 0;
+  const k = Number(parityK);
+  const mult = Number.isFinite(k) && k >= 0 ? k : 2;
   for (const r of rows) {
-    r.sitOuts = nMatch - r.gp;
-    r.adjusted = r.scored + r.sitOuts;
+    r.adjusted = r.scored + mult * (maxGp - r.gp);
   }
 
   rows.sort((a, b) => {
@@ -232,11 +358,11 @@ function addCompetitionRanks(sorted, tiedFn) {
   return ranks;
 }
 
-function renderMatchPointStandings(matches, players) {
+function renderMatchPointStandings(matches, players, parityK) {
   const tb = $("#standings-scored tbody");
   if (!tb) return;
   tb.innerHTML = "";
-  const rows = aggregatePlayerMatchPoints(matches, players);
+  const rows = aggregatePlayerMatchPoints(matches, players, parityK);
   const hasPlay = rows.some((r) => r.gp > 0);
   if (!hasPlay) {
     const tr = document.createElement("tr");
@@ -258,16 +384,21 @@ function renderMatchPointStandings(matches, players) {
   }
 }
 
-function renderLeagueStandings(matches, players) {
+function renderLeagueStandings(_matches, players, parityK) {
   const tb = $("#standings-league tbody");
   if (!tb) return;
   tb.innerHTML = "";
-  const nMatch = (matches || []).length;
+  const maxGp =
+    players.length === 0
+      ? 0
+      : Math.max(...players.map((p) => p.games_played || 0));
+  const k = Number(parityK);
+  const mult = Number.isFinite(k) && k >= 0 ? k : 2;
 
   const rows = players.map((p) => {
     const raw = playerPoints(p);
-    const sitOuts = nMatch - (p.games_played || 0);
-    const adjusted = raw + sitOuts;
+    const gp = p.games_played || 0;
+    const adjusted = raw + mult * (maxGp - gp);
     return { p, raw, adjusted };
   });
 
@@ -302,9 +433,71 @@ function renderLeagueStandings(matches, players) {
   }
 }
 
-function renderStandings(sess) {
-  renderMatchPointStandings(sess.matches, sess.players);
-  renderLeagueStandings(sess.matches, sess.players);
+function renderStandings(sess, parityK = effectiveSitOutScore(sess)) {
+  renderMatchPointStandings(sess.matches, sess.players, parityK);
+  renderLeagueStandings(sess.matches, sess.players, parityK);
+}
+
+function renderSessionSetup(sess) {
+  const scoreInp = $("#config-sit-out-score");
+  if (scoreInp) scoreInp.value = String(effectiveSitOutScore(sess));
+
+  const plist = sess.players || [];
+  const activePl = shuffleActivePlayers(plist);
+  const activeInShuffle = activePl.length;
+  const canRemoveFromShuffle = activeInShuffle > 4;
+
+  const ul = $("#session-setup-player-list");
+  if (ul) {
+    ul.innerHTML = "";
+    const sorted = [...plist].sort((a, b) => {
+      const away = Number(!!a.inactive) - Number(!!b.inactive);
+      if (away !== 0) return away;
+      return a.name.localeCompare(b.name);
+    });
+    for (const p of sorted) {
+      const inactive = !!p.inactive;
+      const li = document.createElement("li");
+      li.className = `session-setup-player-item${inactive ? " session-setup-player-item--inactive" : ""}`;
+      let actionHtml;
+      if (inactive) {
+        actionHtml =
+          '<span class="session-setup-away">Away — enter the same name above to bring them back</span>';
+      } else if (!canRemoveFromShuffle) {
+        actionHtml =
+          '<span class="session-setup-away" title="Need at least four people in shuffle for doubles">Can’t remove — only four in shuffle</span>';
+      } else {
+        actionHtml = `<button type="button" class="secondary session-remove-player" data-player-id="${escapeHtml(p.id)}" aria-label="Remove ${escapeHtml(p.name)} from shuffle">Remove</button>`;
+      }
+      li.innerHTML = `<div class="session-setup-player-main"><span class="session-setup-player-name">${escapeHtml(p.name)}</span><span class="pid">${escapeHtml(p.id)}</span></div><div class="session-setup-player-action">${actionHtml}</div>`;
+      ul.appendChild(li);
+    }
+  }
+
+  const n = plist.length;
+  const rosterFull = n >= MAX_PLAYERS_SESSION;
+  const hasInactive = plist.some((p) => p.inactive);
+  const countMeta = $("#session-player-count-meta");
+  if (countMeta) {
+    countMeta.textContent = `${activeInShuffle} in shuffle · ${n} on roster · max roster ${MAX_PLAYERS_SESSION}`;
+  }
+
+  const cantAddFresh = rosterFull && !hasInactive;
+  const nameInput = $("#session-new-player-name");
+  const btnAdd = $("#btn-add-session-player");
+  const hint = $("#session-setup-player-hint");
+  if (nameInput) nameInput.disabled = cantAddFresh;
+  if (btnAdd) btnAdd.disabled = cantAddFresh;
+  if (hint) {
+    if (cantAddFresh) {
+      hint.textContent = `Everyone is still in shuffle and the roster is full (${MAX_PLAYERS_SESSION}); mark someone as away first before you can add anyone.`;
+    } else if (rosterFull && hasInactive) {
+      hint.textContent = `All ${MAX_PLAYERS_SESSION} roster spots are filled. New names aren’t accepted—only bring back someone who is away using their exact same name (case-insensitive).`;
+    } else {
+      hint.textContent =
+        "Away players keep history and standings. Add someone new if you have roster space, or reuse an away player’s exact name to put them back in the shuffle.";
+    }
+  }
 }
 
 function wireStandingsTabs() {
@@ -340,6 +533,35 @@ function wireStandingsTabs() {
 
   tabScored.addEventListener("click", () => activateMatchPoints(true));
   tabLeague.addEventListener("click", () => activateMatchPoints(false));
+}
+
+function wireSessionSetupTabs() {
+  const tabConfig = $("#tab-session-setup-config");
+  const tabPlayers = $("#tab-session-setup-players");
+  const panelConfig = $("#session-setup-panel-config");
+  const panelPlayers = $("#session-setup-panel-players");
+  if (!tabConfig || !tabPlayers || !panelConfig || !panelPlayers) return;
+
+  function activate(which) {
+    if (which === "config") {
+      tabConfig.classList.add("standings-tab--active");
+      tabPlayers.classList.remove("standings-tab--active");
+      tabConfig.setAttribute("aria-selected", "true");
+      tabPlayers.setAttribute("aria-selected", "false");
+      panelConfig.classList.remove("hidden");
+      panelPlayers.classList.add("hidden");
+    } else {
+      tabPlayers.classList.add("standings-tab--active");
+      tabConfig.classList.remove("standings-tab--active");
+      tabPlayers.setAttribute("aria-selected", "true");
+      tabConfig.setAttribute("aria-selected", "false");
+      panelPlayers.classList.remove("hidden");
+      panelConfig.classList.add("hidden");
+    }
+  }
+
+  tabConfig.addEventListener("click", () => activate("config"));
+  tabPlayers.addEventListener("click", () => activate("players"));
 }
 
 const HISTORY_MONTHS = [
@@ -388,18 +610,14 @@ function formatHistoryPartners(ids, nameMap) {
 
 async function loadSession(id) {
   const sess = await api(`/api/sessions/${id}`);
-  $("#session-meta").textContent =
-    `${String(sess.sport).toUpperCase()} · Session ${id}`;
-  renderStandings(sess);
-  renderSuggestion(sess);
-  renderHistory(sess.matches, sess.players);
-  fillRestingPlayerSelect(sess.players);
-  window.__session = sess;
+  refreshSessionView(sess);
 }
 
 function renderSuggestion(sess) {
   const el = $("#suggestion");
-  const sug = sess.suggested;
+  if (!el) return;
+  el.removeAttribute("aria-busy");
+  const sug = sess?.suggested;
   if (!sug) {
     el.textContent = "No suggestion yet.";
     window.__suggestion = null;
@@ -408,12 +626,12 @@ function renderSuggestion(sess) {
   const teamLine = (players) =>
     players.map((x) => `${escapeHtml(x.name)}`).join(" · ");
   el.innerHTML = `
-    <div class="team-block" data-side="a">
-      <div class="team-title">Team A</div>
+    <div class="team-block" data-side="left">
+      <div class="team-title">Team Left</div>
       <div>${teamLine(sug.team_a)}</div>
     </div>
-    <div class="team-block" data-side="b">
-      <div class="team-title">Team B</div>
+    <div class="team-block" data-side="right">
+      <div class="team-title">Team Right</div>
       <div>${teamLine(sug.team_b)}</div>
     </div>
   `;
@@ -435,11 +653,13 @@ function renderHistory(matches, players) {
       <div class="history-when">${escapeHtml(when)}</div>
       <div class="history-row">
         <div class="history-side history-side-a">
+          <span class="history-side-label">Team Left</span>
           <span class="history-players">${sideA}</span>
           <span class="history-score">(${m.score_a})</span>
         </div>
         <span class="history-vs" aria-hidden="true">vs</span>
         <div class="history-side history-side-b">
+          <span class="history-side-label">Team Right</span>
           <span class="history-players">${sideB}</span>
           <span class="history-score">(${m.score_b})</span>
         </div>
@@ -494,32 +714,40 @@ $("#match-form").addEventListener("submit", async (e) => {
   const score_a = Number(fd.get("score_a"));
   const score_b = Number(fd.get("score_b"));
   if (!Number.isFinite(score_a) || !Number.isFinite(score_b)) {
-    toast("Enter scores for both teams");
+    toast("Enter scores for Team Left and Team Right");
     return;
   }
   if (score_a < 0 || score_b < 0) {
     toast("Scores must be zero or positive");
     return;
   }
+  const prevSess = window.__session;
   const body = {
     team_a_ids: sug.team_a.map((p) => p.id),
     team_b_ids: sug.team_b.map((p) => p.id),
     score_a,
     score_b,
   };
+  showSuggestionLoading("Saving match…");
+  setLineupControlsBusy(true);
   try {
-    const updated = await api(`/api/sessions/${sess.id}/matches`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    window.__session = updated;
-    renderStandings(updated);
-    renderSuggestion(updated);
-    renderHistory(updated.matches, updated.players);
+    const updated = await withMinDelay(LINEUP_ACTION_MIN_MS, () =>
+      api(`/api/sessions/${sess.id}/matches`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    );
+    refreshSessionView(updated);
     clearScoreFields();
     toast("Match saved");
   } catch (err) {
     toast(err.message);
+    if (prevSess) {
+      renderSuggestion(prevSess);
+      updateRecordMatchLabels(prevSess);
+    }
+  } finally {
+    setLineupControlsBusy(false);
   }
 });
 
@@ -531,17 +759,27 @@ $("#btn-reshuffle").addEventListener("click", async () => {
   const idSet = new Set(sess.players.map((p) => p.id));
   const excludeIds = rid && idSet.has(rid) ? [rid] : [];
   const payload = JSON.stringify({ exclude_player_ids: excludeIds });
+  showSuggestionLoading("Reshuffling lineup…");
+  setLineupControlsBusy(true);
   try {
-    const updated = await api(`/api/sessions/${sess.id}/reshuffle`, {
-      method: "POST",
-      body: payload,
-    });
+    const updated = await withMinDelay(LINEUP_ACTION_MIN_MS, () =>
+      api(`/api/sessions/${sess.id}/reshuffle`, {
+        method: "POST",
+        body: payload,
+      }),
+    );
     window.__session = updated;
     renderSuggestion(updated);
+    updateRecordMatchLabels(updated);
+    renderSessionSetup(updated);
     clearScoreFields();
     toast("Lineup updated");
   } catch (err) {
     toast(err.message);
+    renderSuggestion(sess);
+    updateRecordMatchLabels(sess);
+  } finally {
+    setLineupControlsBusy(false);
   }
 });
 
@@ -557,11 +795,7 @@ $("#btn-reset-scores").addEventListener("click", async () => {
       method: "POST",
       body: "{}",
     });
-    window.__session = updated;
-    renderStandings(updated);
-    renderSuggestion(updated);
-    renderHistory(updated.matches, updated.players);
-    fillRestingPlayerSelect(updated.players);
+    refreshSessionView(updated);
     clearScoreFields();
     toast("Standings and history cleared");
   } catch (err) {
@@ -574,6 +808,7 @@ function goHome() {
   window.__suggestion = null;
   $("#view-session").classList.add("hidden");
   $("#view-loading").classList.add("hidden");
+  $("#view-not-found")?.classList.add("hidden");
   const path = location.pathname || "/";
   history.replaceState(null, "", path);
 
@@ -586,12 +821,14 @@ function goHome() {
       .then(() => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
       })
       .catch(() => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
         toast(
@@ -606,6 +843,10 @@ function goHome() {
 
 $("#btn-new-session").addEventListener("click", goHome);
 
+$("#btn-not-found-home")?.addEventListener("click", () => {
+  goHome();
+});
+
 $("#copy-link").addEventListener("click", async () => {
   const sess = window.__session;
   if (!sess) return;
@@ -619,6 +860,84 @@ $("#copy-link").addEventListener("click", async () => {
 });
 
 wireStandingsTabs();
+wireSessionSetupTabs();
+
+$("#form-session-config")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const sess = window.__session;
+  if (!sess) return;
+  const fd = new FormData(e.target);
+  const raw = fd.get("sit_out_score");
+  const sit = Number(raw);
+  if (!Number.isFinite(sit) || sit < 0) {
+    toast("Enter a valid non‑negative multiplier (k)");
+    return;
+  }
+  try {
+    const updated = await api(`/api/sessions/${sess.id}/config`, {
+      method: "PATCH",
+      body: JSON.stringify({ sit_out_score: sit }),
+    });
+    refreshSessionView(updated);
+    toast("Config saved");
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$("#form-add-session-player")?.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const sess = window.__session;
+  if (!sess) return;
+  const fd = new FormData(e.target);
+  const name = String(fd.get("name") ?? "").trim();
+  if (!name) {
+    toast("Enter a player name");
+    return;
+  }
+  const plist = sess.players || [];
+  const reviving = plist.some(
+    (p) => p.inactive && namesEquivalent(p.name, name),
+  );
+  if (plist.length >= MAX_PLAYERS_SESSION && !reviving) {
+    toast(`Roster is full (${MAX_PLAYERS_SESSION} players)`);
+    return;
+  }
+  try {
+    const updated = await api(`/api/sessions/${sess.id}/players`, {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    refreshSessionView(updated);
+    const nameIn = $("#session-new-player-name");
+    if (nameIn) nameIn.value = "";
+    toast(reviving ? `${name} is back in the shuffle` : `Added ${name}`);
+  } catch (err) {
+    toast(err.message);
+  }
+});
+
+$("#session-setup-player-list")?.addEventListener("click", async (ev) => {
+  const btn = ev.target.closest(".session-remove-player");
+  if (!btn || btn.disabled) return;
+  const sess = window.__session;
+  if (!sess) return;
+  const pid = btn.getAttribute("data-player-id");
+  if (!pid) return;
+  const ok = window.confirm(
+    "Remove this player from the shuffle? Their past matches and standings stay.",
+  );
+  if (!ok) return;
+  try {
+    const updated = await api(`/api/sessions/${sess.id}/players/${pid}`, {
+      method: "DELETE",
+    });
+    refreshSessionView(updated);
+    toast("Player removed from shuffle");
+  } catch (err) {
+    toast(err.message);
+  }
+});
 
 function boot() {
   warnIfStaticSiteWithoutApiBase();
@@ -645,12 +964,23 @@ function boot() {
       .then(() => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-not-found")?.classList.add("hidden");
         $("#view-session").classList.remove("hidden");
       })
       .catch((e) => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
+        if (e && typeof e.status === "number" && e.status === 404 && id) {
+          window.__session = null;
+          window.__suggestion = null;
+          $("#view-session").classList.add("hidden");
+          $("#view-home").classList.add("hidden");
+          $("#view-not-found")?.classList.remove("hidden");
+          history.replaceState(null, "", location.pathname || "/");
+          return;
+        }
         toast(e.message);
+        $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
       });
     return;
@@ -665,12 +995,14 @@ function boot() {
       .then(() => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
       })
       .catch(() => {
         $("#view-loading").classList.add("hidden");
         $("#view-loading").setAttribute("aria-busy", "false");
+        $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
         toast(

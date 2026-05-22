@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -30,6 +31,9 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/sessions/{id}/matches", s.handleRecordMatch)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
 	mux.HandleFunc("POST /api/sessions/{id}/reset", s.handleResetScores)
+	mux.HandleFunc("PATCH /api/sessions/{id}/config", s.handlePatchSessionConfig)
+	mux.HandleFunc("POST /api/sessions/{id}/players", s.handleAddSessionPlayer)
+	mux.HandleFunc("DELETE /api/sessions/{id}/players/{player_id}", s.handleRemoveSessionPlayer)
 }
 
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -86,6 +90,9 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		Players: players,
 		Matches: []session.RecordedMatch{},
 	}
+	k0 := session.DefaultSitOutScore(sp)
+	sess.SitOutScore = &k0
+
 	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
 	if err != nil {
 		s.Logger.Error("pick suggestion", "err", err)
@@ -159,8 +166,13 @@ func (s *Server) handleRecordMatch(w http.ResponseWriter, r *http.Request) {
 	}
 	idx := playerIndex(sess)
 	for _, pid := range allIDs {
-		if _, ok := idx[pid]; !ok {
+		p, ok := idx[pid]
+		if !ok {
 			writeError(w, http.StatusBadRequest, "unknown player id")
+			return
+		}
+		if p.Inactive {
+			writeError(w, http.StatusBadRequest, "player is inactive (away from shuffle): re-add by name first")
 			return
 		}
 	}
@@ -227,6 +239,209 @@ func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, sess)
+}
+
+type patchSessionConfigBody struct {
+	SitOutScore *float64 `json:"sit_out_score"`
+}
+
+func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, id, w)
+	if sess == nil {
+		return
+	}
+	if err != nil {
+		return
+	}
+	var body patchSessionConfigBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if body.SitOutScore == nil {
+		writeError(w, http.StatusBadRequest, "sit_out_score required")
+		return
+	}
+	v := *body.SitOutScore
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		writeError(w, http.StatusBadRequest, "sit_out_score must be a finite number")
+		return
+	}
+	if v < 0 || v > 1000 {
+		writeError(w, http.StatusBadRequest, "sit_out_score must be between 0 and 1000")
+		return
+	}
+	sess.SitOutScore = &v
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session config", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+type addSessionPlayerBody struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) handleAddSessionPlayer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	id := r.PathValue("id")
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, id, w)
+	if sess == nil {
+		return
+	}
+	if err != nil {
+		return
+	}
+	var body addSessionPlayerBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	name := strings.TrimSpace(body.Name)
+	if name == "" {
+		writeError(w, http.StatusBadRequest, "player name required")
+		return
+	}
+
+	for _, p := range sess.Players {
+		if !p.Inactive && strings.EqualFold(strings.TrimSpace(p.Name), name) {
+			writeError(w, http.StatusBadRequest, "a player with that name is already in the shuffle")
+			return
+		}
+	}
+
+	reviveIdx := -1
+	for i := range sess.Players {
+		p := sess.Players[i]
+		if p.Inactive && strings.EqualFold(strings.TrimSpace(p.Name), name) {
+			reviveIdx = i
+			break
+		}
+	}
+
+	if reviveIdx >= 0 {
+		sess.Players[reviveIdx].Inactive = false
+	} else {
+		if len(sess.Players) >= 16 {
+			writeError(w, http.StatusBadRequest, "maximum 16 players per session")
+			return
+		}
+		newID := newPlayerID()
+		seen := playerIDSet(sess.Players)
+		for seen[newID] {
+			newID = newPlayerID()
+		}
+		sess.Players = append(sess.Players, session.Player{ID: newID, Name: name})
+	}
+
+	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	if err != nil {
+		s.Logger.Error("pick suggestion after add player", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
+		return
+	}
+	sess.Suggested = sug
+	sess.SuggestionKey = key
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	pid := strings.TrimSpace(r.PathValue("player_id"))
+	id := r.PathValue("id")
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, id, w)
+	if sess == nil {
+		return
+	}
+	if err != nil {
+		return
+	}
+	idx := playerIndex(sess)
+	target, ok := idx[pid]
+	if !ok {
+		writeError(w, http.StatusBadRequest, "unknown player id")
+		return
+	}
+	if target.Inactive {
+		writeJSON(w, http.StatusOK, sess)
+		return
+	}
+
+	if shuffleActiveCount(sess.Players) <= 4 {
+		writeError(w, http.StatusBadRequest, "cannot remove players from shuffle: need at least 4 active players for doubles")
+		return
+	}
+
+	for i := range sess.Players {
+		if sess.Players[i].ID == pid {
+			sess.Players[i].Inactive = true
+			break
+		}
+	}
+
+	sug, key, errPick := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	if errPick != nil {
+		for i := range sess.Players {
+			if sess.Players[i].ID == pid {
+				sess.Players[i].Inactive = false
+				break
+			}
+		}
+		if errors.Is(errPick, scheduler.ErrNoLineup) {
+			writeError(w, http.StatusBadRequest, "cannot remove player: lineup would drop below four active players")
+			return
+		}
+		s.Logger.Error("pick suggestion after remove shuffle player", "err", errPick)
+		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
+		return
+	}
+	sess.Suggested = sug
+	sess.SuggestionKey = key
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+func shuffleActiveCount(players []session.Player) int {
+	n := 0
+	for _, p := range players {
+		if !p.Inactive {
+			n++
+		}
+	}
+	return n
+}
+
+func playerIDSet(players []session.Player) map[string]bool {
+	m := make(map[string]bool, len(players))
+	for _, p := range players {
+		m[p.ID] = true
+	}
+	return m
 }
 
 func (s *Server) handleResetScores(w http.ResponseWriter, r *http.Request) {
