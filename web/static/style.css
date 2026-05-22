@@ -387,61 +387,11 @@ button.secondary {
 }
 
 .history-item {
-  position: relative;
-  --history-r: 14px;
   background: #fff;
   border: 1px solid #e2e8f0;
-  border-radius: var(--history-r);
+  border-radius: 14px;
   padding: 0.95rem 1.05rem;
   box-shadow: 0 1px 3px rgb(15 23 42 / 8%);
-}
-
-/* Top-corner wedge: gradient + matching radius aligns outer arc with card */
-.history-item--win-left {
-  padding-left: calc(1.05rem + 14px);
-}
-
-.history-item--win-right {
-  padding-right: calc(1.05rem + 14px);
-}
-
-.history-item--win-left::before,
-.history-item--win-right::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  width: 26px;
-  height: 26px;
-  pointer-events: none;
-}
-
-.history-item--win-left::before {
-  left: 0;
-  border-top-left-radius: var(--history-r);
-  background: linear-gradient(
-    to bottom right,
-    #22c55e 0%,
-    #22c55e 51%,
-    transparent 51%
-  );
-}
-
-.history-item--win-right::before {
-  right: 0;
-  left: auto;
-  border-top-right-radius: var(--history-r);
-  background: linear-gradient(
-    to bottom left,
-    #22c55e 0%,
-    #22c55e 51%,
-    transparent 51%
-  );
-}
-
-.history-item--win-left > *,
-.history-item--win-right > * {
-  position: relative;
-  z-index: 1;
 }
 
 .history-when {
@@ -483,12 +433,25 @@ button.secondary {
 }
 
 .history-score {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
   font-weight: 700;
   font-size: 1.05rem;
   color: #15803d;
   white-space: nowrap;
 }
 
+.history-score--winner::after {
+  content: "";
+  margin-top: 0.38rem;
+  height: 3px;
+  width: min(2.75rem, 100%);
+  min-width: 1.65em;
+  background: #22c55e;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
 .history-vs {
   flex: 0 0 auto;
   align-self: center;

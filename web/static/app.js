@@ -651,17 +651,18 @@ function renderHistory(matches, players) {
     const sa = Number(m.score_a) || 0;
     const sb = Number(m.score_b) || 0;
     let outcomeAria = "";
-    let itemMods = "";
+    let scoreWinA = "";
+    let scoreWinB = "";
     if (sa > sb) {
-      itemMods = " history-item--win-left";
+      scoreWinA = " history-score--winner";
       outcomeAria = "Team Left won.";
     } else if (sb > sa) {
-      itemMods = " history-item--win-right";
+      scoreWinB = " history-score--winner";
       outcomeAria = "Team Right won.";
     } else {
       outcomeAria = "Draw.";
     }
-    li.className = `history-item${itemMods}`;
+    li.className = "history-item";
     li.setAttribute(
       "aria-label",
       `${when} ${outcomeAria} Score ${sa}–${sb}.`,
@@ -672,13 +673,13 @@ function renderHistory(matches, players) {
         <div class="history-side history-side-a">
           <span class="history-side-label">Team Left</span>
           <span class="history-players">${sideA}</span>
-          <span class="history-score">${sa}</span>
+          <span class="history-score${scoreWinA}">${sa}</span>
         </div>
         <span class="history-vs" aria-hidden="true">vs</span>
         <div class="history-side history-side-b">
           <span class="history-side-label">Team Right</span>
           <span class="history-players">${sideB}</span>
-          <span class="history-score">${sb}</span>
+          <span class="history-score${scoreWinB}">${sb}</span>
         </div>
       </div>
     `;
