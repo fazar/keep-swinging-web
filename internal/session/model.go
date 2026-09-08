@@ -10,6 +10,24 @@ const (
 	SportPadel  Sport = "padel"
 )
 
+// MatchFormat controls the team size for matchmaking.
+type MatchFormat string
+
+const (
+	MatchFormatDoubles MatchFormat = "doubles"
+	MatchFormatSingles MatchFormat = "singles"
+)
+
+// ShufflingStyle controls how players are paired into doubles teams.
+type ShufflingStyle string
+
+const (
+	ShufflingStyleAmericano     ShufflingStyle = "americano"
+	ShufflingStyleMexicano      ShufflingStyle = "mexicano"
+	ShufflingStyleMexicanoTopVsTop    ShufflingStyle = "mexicano_top_vs_top"
+	ShufflingStyleMexicanoTopVsBottom ShufflingStyle = "mexicano_top_vs_bottom"
+)
+
 // DefaultSitOutScore is parity multiplier **k** for new sessions before any PATCH.
 func DefaultSitOutScore(sp Sport) float64 {
 	switch sp {
@@ -52,13 +70,15 @@ type RecordedMatch struct {
 type Session struct {
 	ID            string          `json:"id"`
 	Sport         Sport           `json:"sport"`
+	MatchFormat   MatchFormat     `json:"match_format"`
 	Players       []Player        `json:"players"`
 	Suggested     *SuggestedMatch `json:"suggested,omitempty"`
 	Matches       []RecordedMatch `json:"matches"`
 	SuggestionKey string          `json:"suggestion_key,omitempty"` // canonical lineup key for reshuffle exclusion
 	// SitOutScore is multiplied by (leader GP − your GP) in standings parity.
 	// Omitted/absent in storage ⇒ UI uses DefaultSitOutScore(sport).
-	SitOutScore *float64 `json:"sit_out_score,omitempty"`
+	SitOutScore       *float64       `json:"sit_out_score,omitempty"`
+	ShufflingStyle    ShufflingStyle `json:"shuffling_style,omitempty"`
 	// HideInactiveFromStandings when true omits inactive (away) players from standings tables (default).
 	HideInactiveFromStandings *bool `json:"hide_inactive_from_standings,omitempty"`
 	// HideInactiveFromMatches when true hides entire finished games that touch an inactive (away) roster member in UI (default).
