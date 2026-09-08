@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -61,21 +62,40 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Sport   string   `json:"sport"`
-		Players []string `json:"players"`
+		Sport          string   `json:"sport"`
+		Players        []string `json:"players"`
+		MatchFormat    string   `json:"match_format,omitempty"`
+		ShufflingStyle string   `json:"shuffling_style,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
+
 	sp, ok := parseSport(req.Sport)
 	if !ok {
 		writeError(w, http.StatusBadRequest, "sport must be tennis or padel")
 		return
 	}
+
+	var mf session.MatchFormat
+	switch req.MatchFormat {
+	case "singles":
+		mf = session.MatchFormatSingles
+	case "doubles", "":
+		mf = session.MatchFormatDoubles
+	default:
+		writeError(w, http.StatusBadRequest, "match_format must be doubles or singles")
+		return
+	}
+
 	names := normalizeNames(req.Players)
-	if !(len(names) >= 4 && len(names) <= 16) {
-		writeError(w, http.StatusBadRequest, "need between 4 and 16 players")
+	if mf == session.MatchFormatSingles && (len(names) < 2 || len(names) > 16) {
+		writeError(w, http.StatusBadRequest, "need between 2 and 16 players for singles")
+		return
+	}
+	if mf == session.MatchFormatDoubles && (len(names) < 4 || len(names) > 16) {
+		writeError(w, http.StatusBadRequest, "need between 4 and 16 players for doubles")
 		return
 	}
 	players := make([]session.Player, 0, len(names))
@@ -89,19 +109,30 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 		players = append(players, session.Player{ID: id, Name: name})
 	}
 	sess := &session.Session{
-		ID:      newSessionID(),
-		Sport:   sp,
-		Players: players,
-		Matches: []session.RecordedMatch{},
+		ID:          newSessionID(),
+		Sport:       sp,
+		MatchFormat: mf,
+		Players:     players,
+		Matches:     []session.RecordedMatch{},
+	}
+	if req.ShufflingStyle != "" {
+		sess.ShufflingStyle = session.ShufflingStyle(req.ShufflingStyle)
 	}
 	k0 := session.DefaultSitOutScore(sp)
 	sess.SitOutScore = &k0
 
 	session.EnsureHideInactiveDefaults(sess)
 
-	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
-	if err != nil {
-		s.Logger.Error("pick suggestion", "err", err)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
+	if errPick != nil {
+		s.Logger.Error("pick suggestion", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not build lineup")
 		return
 	}
@@ -149,14 +180,6 @@ func (s *Server) handleRecordMatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
 	}
-	if len(body.TeamAIDs) != 2 || len(body.TeamBIDs) != 2 {
-		writeError(w, http.StatusBadRequest, "team_a_ids and team_b_ids must each have 2 player ids")
-		return
-	}
-	if body.ScoreA < 0 || body.ScoreB < 0 {
-		writeError(w, http.StatusBadRequest, "scores must be non-negative")
-		return
-	}
 	ctx := r.Context()
 	sess, err := s.loadSession(ctx, id, w)
 	if sess == nil {
@@ -165,10 +188,32 @@ func (s *Server) handleRecordMatch(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	allIDs := append(append([]string{}, body.TeamAIDs...), body.TeamBIDs...)
-	if !distinctFour(allIDs) {
-		writeError(w, http.StatusBadRequest, "need four distinct player ids")
+	if sess.MatchFormat == session.MatchFormatSingles {
+		if len(body.TeamAIDs) != 1 || len(body.TeamBIDs) != 1 {
+			writeError(w, http.StatusBadRequest, "team_a_ids and team_b_ids must each have 1 player id for singles")
+			return
+		}
+	} else {
+		if len(body.TeamAIDs) != 2 || len(body.TeamBIDs) != 2 {
+			writeError(w, http.StatusBadRequest, "team_a_ids and team_b_ids must each have 2 player ids")
+			return
+		}
+	}
+	if body.ScoreA < 0 || body.ScoreB < 0 {
+		writeError(w, http.StatusBadRequest, "scores must be non-negative")
 		return
+	}
+	allIDs := append(append([]string{}, body.TeamAIDs...), body.TeamBIDs...)
+	if sess.MatchFormat == session.MatchFormatSingles {
+		if len(allIDs) != 2 || allIDs[0] == allIDs[1] {
+			writeError(w, http.StatusBadRequest, "need two distinct player ids")
+			return
+		}
+	} else {
+		if !distinctFour(allIDs) {
+			writeError(w, http.StatusBadRequest, "need four distinct player ids")
+			return
+		}
 	}
 	idx := playerIndex(sess)
 	for _, pid := range allIDs {
@@ -192,9 +237,16 @@ func (s *Server) handleRecordMatch(w http.ResponseWriter, r *http.Request) {
 	applyMatchResult(sess, rec)
 	sess.Matches = append(sess.Matches, rec)
 
-	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
-	if err != nil {
-		s.Logger.Error("pick suggestion after match", "err", err)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
+	if errPick != nil {
+		s.Logger.Error("pick suggestion after match", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
 		return
 	}
@@ -239,7 +291,14 @@ func (s *Server) handleDeleteMatch(w http.ResponseWriter, r *http.Request) {
 	revertMatchResult(sess, rec)
 	sess.Matches = slices.Delete(sess.Matches, idx, idx+1)
 
-	sug, key, errPick := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
 	if errPick != nil {
 		s.Logger.Error("pick suggestion after delete match", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
@@ -305,7 +364,14 @@ func (s *Server) handlePatchMatchScores(w http.ResponseWriter, r *http.Request) 
 	applyMatchResult(sess, upd)
 	sess.Matches[idx] = upd
 
-	sug, key, errPick := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
 	if errPick != nil {
 		s.Logger.Error("pick suggestion after patch match scores", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
@@ -340,8 +406,15 @@ func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, sess.SuggestionKey, body.ExcludePlayerIDs)
-	if err != nil {
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, sess.SuggestionKey, body.ExcludePlayerIDs)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, sess.SuggestionKey, body.ExcludePlayerIDs)
+	}
+	if errPick != nil {
 		if errors.Is(err, scheduler.ErrNoLineup) {
 			writeError(w, http.StatusBadRequest, "no alternate lineup (try fewer exclusions or add players)")
 			return
@@ -480,9 +553,16 @@ func (s *Server) handleAddSessionPlayer(w http.ResponseWriter, r *http.Request) 
 		sess.Players = append(sess.Players, session.Player{ID: newID, Name: name})
 	}
 
-	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
-	if err != nil {
-		s.Logger.Error("pick suggestion after add player", "err", err)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
+	if errPick != nil {
+		s.Logger.Error("pick suggestion after add player", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
 		return
 	}
@@ -522,8 +602,14 @@ func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if shuffleActiveCount(sess.Players) <= 4 {
-		writeError(w, http.StatusBadRequest, "cannot remove players from shuffle: need at least 4 active players for doubles")
+	var minActive int
+	if sess.MatchFormat == session.MatchFormatSingles {
+		minActive = 2
+	} else {
+		minActive = 4
+	}
+	if shuffleActiveCount(sess.Players) <= minActive {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("cannot remove players from shuffle: need at least %d active players", minActive))
 		return
 	}
 
@@ -534,7 +620,14 @@ func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	sug, key, errPick := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
 	if errPick != nil {
 		for i := range sess.Players {
 			if sess.Players[i].ID == pid {
@@ -542,8 +635,8 @@ func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Reques
 				break
 			}
 		}
-		if errors.Is(errPick, scheduler.ErrNoLineup) {
-			writeError(w, http.StatusBadRequest, "cannot remove player: lineup would drop below four active players")
+		if errors.Is(errPick, scheduler.ErrNoSinglesLineup) {
+			writeError(w, http.StatusBadRequest, "cannot remove player: lineup would drop below two active players")
 			return
 		}
 		s.Logger.Error("pick suggestion after remove shuffle player", "err", errPick)
@@ -602,9 +695,16 @@ func (s *Server) handleResetScores(w http.ResponseWriter, r *http.Request) {
 	sess.Matches = []session.RecordedMatch{}
 	sess.SuggestionKey = ""
 
-	sug, key, err := scheduler.PickSuggestion(sess.Players, sess.Matches, "", nil)
-	if err != nil {
-		s.Logger.Error("pick suggestion after reset", "err", err)
+	var sug *session.SuggestedMatch
+	var key string
+	var errPick error
+	if sess.MatchFormat == session.MatchFormatSingles {
+		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	} else {
+		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+	}
+	if errPick != nil {
+		s.Logger.Error("pick suggestion after reset", "err", errPick)
 		writeError(w, http.StatusInternalServerError, "could not build lineup after reset")
 		return
 	}

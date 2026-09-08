@@ -139,6 +139,7 @@ async function waitForApiReady() {
 }
 
 function playerRows(count) {
+  const minRequired = count < 4 ? 2 : 4;
   const wrap = $("#players-inputs");
   wrap.innerHTML = "";
   for (let i = 0; i < count; i += 1) {
@@ -146,7 +147,7 @@ function playerRows(count) {
     inp.type = "text";
     inp.placeholder = `Player ${i + 1}`;
     inp.autocomplete = "off";
-    inp.required = i < 4;
+    inp.required = i < minRequired;
     wrap.appendChild(inp);
   }
 }
@@ -321,9 +322,18 @@ function recomputeLeagueStatsFromMatches(matches, players) {
   }));
 }
 
-function doublesNamesParen(players) {
+function formatPartners(players, separator) {
+  const sep = separator || " · ";
   if (!players || !players.length) return "";
-  return players.map((p) => (p.name || "").trim() || "?").join(" · ");
+  return players.map((p) => (p.name || "").trim() || "?").join(sep);
+}
+
+function isDoubles(sess) {
+  return (sess?.match_format || "doubles") === "doubles";
+}
+
+function matchCountLimit(sess) {
+  return isDoubles(sess) ? 4 : 2;
 }
 
 function updateRecordMatchLabels(sess) {
@@ -336,8 +346,8 @@ function updateRecordMatchLabels(sess) {
     rightLbl.textContent = "Team Right score";
     return;
   }
-  leftLbl.textContent = `Team Left (${doublesNamesParen(sug.team_a)})`;
-  rightLbl.textContent = `Team Right (${doublesNamesParen(sug.team_b)})`;
+  leftLbl.textContent = `Team Left (${formatPartners(sug.team_a)})`;
+  rightLbl.textContent = `Team Right (${formatPartners(sug.team_b)})`;
 }
 
 function showSuggestionLoading(message) {
@@ -369,6 +379,7 @@ function setLineupControlsBusy(busy) {
 function refreshSessionView(sess) {
   window.__session = sess;
   window.__historyEditIdx = null;
+  updateMatchFormatLabels(sess);
   $("#session-meta").textContent =
     `${String(sess.sport).toUpperCase()} · Session ${sess.id}`;
   const k = effectiveSitOutScore(sess);
@@ -378,6 +389,7 @@ function refreshSessionView(sess) {
   renderHistory(sess.matches, sess.players, sess);
   fillRestingPlayerSelect(sess.players);
   renderSessionSetup(sess);
+  fillMinPlayers(sess);
   setLineupControlsBusy(false);
 }
 
@@ -399,6 +411,26 @@ function fillRestingPlayerSelect(players) {
     sel.value = prev;
   } else {
     sel.value = "";
+  }
+}
+
+function fillMinPlayers(sess) {
+  const count = isDoubles(sess) ? 6 : 6;
+  const wrap = $("#players-inputs");
+  if (!wrap) return;
+  const currentInputs = wrap.querySelectorAll("input").length;
+  if (currentInputs !== count) {
+    playerRows(count);
+  }
+}
+
+function updateMatchFormatLabels(sess) {
+  const heading = $("#suggestion-heading");
+  const labelLeft = $("#match-label-left");
+  const labelRight = $("#match-label-right");
+  const isD = isDoubles(sess);
+  if (heading) {
+    heading.textContent = isD ? "Suggested doubles" : "Suggested singles";
   }
 }
 
@@ -945,13 +977,15 @@ $("#create-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const sport = fd.get("sport");
+  const matchFormat = String(fd.get("match_format") || "doubles");
+  const shufflingStyle = String(fd.get("shuffling_style") || "americano");
   const names = [...document.querySelectorAll("#players-inputs input")]
     .map((i) => i.value.trim())
     .filter(Boolean);
   try {
     const sess = await api("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ sport, players: names }),
+      body: JSON.stringify({ sport, players: names, match_format: matchFormat, shuffling_style: shufflingStyle }),
     });
     history.replaceState(null, "", `?id=${encodeURIComponent(sess.id)}`);
     $("#view-home").classList.add("hidden");
