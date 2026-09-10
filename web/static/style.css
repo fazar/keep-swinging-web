@@ -219,6 +219,64 @@ button.secondary {
   border: 1px solid #e2e8f0;
 }
 
+.round-board {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.court-card {
+  padding: 0.9rem;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.court-card--unused {
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.court-card-head,
+.court-score-row,
+.court-teams {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.court-status {
+  color: #64748b;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+}
+
+.court-teams {
+  margin: 0.85rem 0;
+}
+
+.court-teams > div {
+  flex: 1;
+}
+
+.court-score-row label {
+  flex: 1;
+}
+
+.court-score-row input {
+  display: block;
+  margin-top: 0.25rem;
+}
+
+@media (min-width: 44rem) {
+  body {
+    max-width: 54rem;
+  }
+
+  .round-board {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 /* Suggested doubles panel: keeps loading state flush with card surface */
 #suggestion.card {
   overflow: hidden;
