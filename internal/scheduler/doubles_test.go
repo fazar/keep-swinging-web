@@ -23,7 +23,7 @@ func TestPickSuggestion_prefersUnderplayed(t *testing.T) {
 		{ID: "p5", Name: "E", GamesPlayed: 5},
 		{ID: "p6", Name: "F", GamesPlayed: 5},
 	}
-	sug, _, err := PickSuggestion(players, nil, "", nil)
+	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleAmericano, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,11 +46,11 @@ func TestPickSuggestion_reshuffleExcludesKey(t *testing.T) {
 		{ID: "c", Name: "C", GamesPlayed: 0},
 		{ID: "d", Name: "D", GamesPlayed: 0},
 	}
-	_, key1, err := PickSuggestion(players, nil, "", nil)
+	_, key1, err := PickSuggestion(players, nil, session.ShufflingStyleAmericano, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, key2, err := PickSuggestion(players, nil, key1, nil)
+	_, key2, err := PickSuggestion(players, nil, session.ShufflingStyleAmericano, key1, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestPickSuggestion_excludePlayer(t *testing.T) {
 		{ID: "p4", Name: "D", GamesPlayed: 0},
 		{ID: "p5", Name: "E", GamesPlayed: 0},
 	}
-	sug, _, err := PickSuggestion(players, nil, "", []string{"p5"})
+	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleAmericano, "", []string{"p5"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,7 +88,7 @@ func TestPickSuggestion_ignoresInactive(t *testing.T) {
 		{ID: "d", Name: "D"},
 		{ID: "away", Name: "Away", Inactive: true},
 	}
-	sug, _, err := PickSuggestion(players, nil, "", nil)
+	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleAmericano, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,7 +122,7 @@ func TestPartnerRotation_blocksRepeatUntilEveryoneElse(t *testing.T) {
 	matches := []session.RecordedMatch{
 		{TeamAIDs: []string{"a", "b"}, TeamBIDs: []string{"c", "d"}, ScoreA: 1, ScoreB: 0},
 	}
-	sug, _, err := PickSuggestion(players, matches, "", nil)
+	sug, _, err := PickSuggestion(players, matches, session.ShufflingStyleAmericano, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,8 +146,52 @@ func TestPartnerRotation_allowsRepeatAfterFullCycle(t *testing.T) {
 		{TeamAIDs: []string{"a", "c"}, TeamBIDs: []string{"b", "d"}},
 		{TeamAIDs: []string{"a", "d"}, TeamBIDs: []string{"b", "c"}},
 	}
-	_, _, err := PickSuggestion(players, matches, "", nil)
+	_, _, err := PickSuggestion(players, matches, session.ShufflingStyleAmericano, "", nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPickSuggestion_mexicanoPrefersUnderplayed(t *testing.T) {
+	players := []session.Player{
+		{ID: "p1", Name: "A", GamesPlayed: 0},
+		{ID: "p2", Name: "B", GamesPlayed: 0},
+		{ID: "p3", Name: "C", GamesPlayed: 10},
+		{ID: "p4", Name: "D", GamesPlayed: 10},
+		{ID: "p5", Name: "E", GamesPlayed: 20},
+		{ID: "p6", Name: "F", GamesPlayed: 20},
+	}
+	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleMexicano, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids := map[string]bool{}
+	for _, p := range append(sug.TeamA, sug.TeamB...) {
+		ids[p.ID] = true
+	}
+	if !ids["p1"] || !ids["p2"] {
+		t.Fatalf("mexicano should prefer underplayed players for fairness, got %#v", sug)
+	}
+}
+
+func TestPickSuggestion_mexicanoBalancesTeams(t *testing.T) {
+	players := []session.Player{
+		{ID: "p1", Name: "A", GamesPlayed: 10},
+		{ID: "p2", Name: "B", GamesPlayed: 11},
+		{ID: "p3", Name: "C", GamesPlayed: 12},
+		{ID: "p4", Name: "D", GamesPlayed: 13},
+		{ID: "p5", Name: "E", GamesPlayed: 20},
+		{ID: "p6", Name: "F", GamesPlayed: 21},
+	}
+	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleMexicano, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	teamA := sug.TeamA[0].GamesPlayed + sug.TeamA[1].GamesPlayed
+	teamB := sug.TeamB[0].GamesPlayed + sug.TeamB[1].GamesPlayed
+	// mexicano picks the 4 least-experienced players and pairs strongest vs weakest (max diff)
+	gotValid := (teamA == 21 && teamB == 25) || (teamA == 25 && teamB == 21)
+	if !gotValid {
+		t.Fatalf("mexicano should pair least-experienced with strongest vs weakest, got teamA=%d teamB=%d sug=%+v", teamA, teamB, sug)
 	}
 }

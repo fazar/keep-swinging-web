@@ -139,6 +139,7 @@ async function waitForApiReady() {
 }
 
 function playerRows(count) {
+  const minRequired = count < 4 ? 2 : 4;
   const wrap = $("#players-inputs");
   wrap.innerHTML = "";
   for (let i = 0; i < count; i += 1) {
@@ -146,7 +147,7 @@ function playerRows(count) {
     inp.type = "text";
     inp.placeholder = `Player ${i + 1}`;
     inp.autocomplete = "off";
-    inp.required = i < 4;
+    inp.required = i < minRequired;
     wrap.appendChild(inp);
   }
 }
@@ -256,9 +257,31 @@ function matchInvolvesInactivePlayer(m, playerById) {
   return false;
 }
 
+function roundMatches(sess) {
+  const rounds = [...(sess?.rounds || [])];
+  if (sess?.current_round) rounds.push(sess.current_round);
+  return rounds.flatMap((round) =>
+    (round.slots || [])
+      .filter(
+        (slot) =>
+          slot.status === "completed" &&
+          slot.score_a != null &&
+          slot.score_b != null,
+      )
+      .map((slot) => ({
+        team_a_ids: (slot.team_a || []).map((p) => p.id),
+        team_b_ids: (slot.team_b || []).map((p) => p.id),
+        score_a: slot.score_a,
+        score_b: slot.score_b,
+        played_at: slot.played_at,
+        round_slot: true,
+      })),
+  );
+}
+
 /** Matches used for standings aggregates and counted in history when hiding games with away roster members */
 function matchesForStandingsAndAggregate(sess) {
-  const all = sess?.matches ?? [];
+  const all = [...(sess?.matches ?? []), ...roundMatches(sess)];
   if (!sess || !effectiveHideInactiveFromMatches(sess)) return [...all];
   const byId = idToPlayerById(sess.players || []);
   return all.filter((m) => !matchInvolvesInactivePlayer(m, byId));
@@ -321,9 +344,18 @@ function recomputeLeagueStatsFromMatches(matches, players) {
   }));
 }
 
-function doublesNamesParen(players) {
+function formatPartners(players, separator) {
+  const sep = separator || " · ";
   if (!players || !players.length) return "";
-  return players.map((p) => (p.name || "").trim() || "?").join(" · ");
+  return players.map((p) => (p.name || "").trim() || "?").join(sep);
+}
+
+function isDoubles(sess) {
+  return (sess?.match_format || "doubles") === "doubles";
+}
+
+function matchCountLimit(sess) {
+  return isDoubles(sess) ? 4 : 2;
 }
 
 function updateRecordMatchLabels(sess) {
@@ -336,8 +368,8 @@ function updateRecordMatchLabels(sess) {
     rightLbl.textContent = "Team Right score";
     return;
   }
-  leftLbl.textContent = `Team Left (${doublesNamesParen(sug.team_a)})`;
-  rightLbl.textContent = `Team Right (${doublesNamesParen(sug.team_b)})`;
+  leftLbl.textContent = `Team Left (${formatPartners(sug.team_a)})`;
+  rightLbl.textContent = `Team Right (${formatPartners(sug.team_b)})`;
 }
 
 function showSuggestionLoading(message) {
@@ -369,16 +401,61 @@ function setLineupControlsBusy(busy) {
 function refreshSessionView(sess) {
   window.__session = sess;
   window.__historyEditIdx = null;
+  updateMatchFormatLabels(sess);
   $("#session-meta").textContent =
     `${String(sess.sport).toUpperCase()} · Session ${sess.id}`;
   const k = effectiveSitOutScore(sess);
   renderStandings(sess, k);
-  renderSuggestion(sess);
-  updateRecordMatchLabels(sess);
-  renderHistory(sess.matches, sess.players, sess);
+  if (isRoundSession(sess)) renderRoundBoard(sess);
+  else renderSuggestion(sess);
+  renderHistory([...sess.matches, ...roundMatches(sess)], sess.players, sess);
   fillRestingPlayerSelect(sess.players);
   renderSessionSetup(sess);
+  fillMinPlayers(sess);
   setLineupControlsBusy(false);
+}
+
+function isRoundSession(sess) {
+  return !!sess?.current_round;
+}
+
+function renderRoundBoard(sess) {
+  const el = $("#suggestion");
+  const round = sess?.current_round;
+  const complete = $("#btn-complete-round");
+  if (!el) return;
+  if (!round) {
+    el.textContent = "No open round.";
+    if (complete) complete.classList.add("hidden");
+    return;
+  }
+  let hasCompleted = false;
+  let pending = false;
+  el.innerHTML = `<div class="round-board">${(round.slots || []).map((slot) => {
+    const isUnused = slot.status === "unused";
+    const isDone = slot.status === "completed";
+    hasCompleted ||= isDone;
+    pending ||= slot.status === "pending";
+    const team = (players) => (players || []).map((p) => escapeHtml(p.name)).join(" · ");
+    const scoreA = slot.score_a ?? "";
+    const scoreB = slot.score_b ?? "";
+    return `<article class="court-card court-card--${escapeHtml(slot.status)}" data-court-id="${escapeHtml(slot.court_id)}">
+      <div class="court-card-head"><strong>${escapeHtml(slot.court_name)}</strong><span class="court-status">${isUnused ? "Unused" : isDone ? "Saved" : "Pending"}</span></div>
+      ${isUnused ? "<p class=\"hint\">Not enough active players.</p>" : `<div class="court-teams"><div><span class="team-title">Team Left</span>${team(slot.team_a)}</div><div><span class="team-title">Team Right</span>${team(slot.team_b)}</div></div>
+      <div class="court-score-row"><label>Left <input type="number" min="0" step="1" data-score-a value="${scoreA}"></label><label>Right <input type="number" min="0" step="1" data-score-b value="${scoreB}"></label></div>
+      <div class="row"><button type="button" class="court-save">${isDone ? "Update" : "Save"}</button>${isDone ? "<button type=\"button\" class=\"court-delete secondary\">Clear</button>" : ""}</div>`}
+    </article>`;
+  }).join("")}</div>`;
+  if (complete) {
+    complete.classList.toggle("hidden", !round || pending || !hasCompleted);
+    complete.disabled = pending || !hasCompleted;
+  }
+}
+
+function renderCourtConfig(sess) {
+  const wrap = $("#court-config-fields");
+  if (!wrap || !isRoundSession(sess)) return;
+  wrap.innerHTML = sess.courts.map((court) => `<label>Court name<input type="text" data-court-name="${escapeHtml(court.id)}" value="${escapeHtml(court.name)}" required></label>`).join("");
 }
 
 function fillRestingPlayerSelect(players) {
@@ -399,6 +476,26 @@ function fillRestingPlayerSelect(players) {
     sel.value = prev;
   } else {
     sel.value = "";
+  }
+}
+
+function fillMinPlayers(sess) {
+  const count = isDoubles(sess) ? 6 : 6;
+  const wrap = $("#players-inputs");
+  if (!wrap) return;
+  const currentInputs = wrap.querySelectorAll("input").length;
+  if (currentInputs !== count) {
+    playerRows(count);
+  }
+}
+
+function updateMatchFormatLabels(sess) {
+  const heading = $("#suggestion-heading");
+  const labelLeft = $("#match-label-left");
+  const labelRight = $("#match-label-right");
+  const isD = isDoubles(sess);
+  if (heading) {
+    heading.textContent = isD ? "Suggested doubles" : "Suggested singles";
   }
 }
 
@@ -574,6 +671,7 @@ function renderStandings(sess, parityK = effectiveSitOutScore(sess)) {
 }
 
 function renderSessionSetup(sess) {
+  renderCourtConfig(sess);
   const scoreInp = $("#config-sit-out-score");
   if (scoreInp) scoreInp.value = String(effectiveSitOutScore(sess));
 
@@ -864,8 +962,9 @@ function renderHistory(matches, players, sess) {
       `${when} ${outcomeAria} Score ${sa}–${sb}.`,
     );
 
-    const actionsHidden = isEditing ? " hidden" : "";
-    const editBarHtml = isEditing
+    const isRoundResult = m.round_slot === true;
+    const actionsHidden = isEditing || isRoundResult ? " hidden" : "";
+    const editBarHtml = isEditing && !isRoundResult
       ? `<div class="history-edit-bar" role="group" aria-label="Save or cancel editing scores">
         <button type="button" class="history-edit-save">Save scores</button>
         <button type="button" class="history-edit-cancel secondary">Cancel</button>
@@ -927,7 +1026,7 @@ function renderHistory(matches, players, sess) {
 function rerenderHistoryOnly() {
   const sess = window.__session;
   if (!sess) return;
-  renderHistory(sess.matches, sess.players, sess);
+  renderHistory([...sess.matches, ...roundMatches(sess)], sess.players, sess);
 }
 
 $("#add-player").addEventListener("click", () => {
@@ -945,13 +1044,15 @@ $("#create-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const fd = new FormData(e.target);
   const sport = fd.get("sport");
+  const matchFormat = String(fd.get("match_format") || "doubles");
+  const shufflingStyle = String(fd.get("shuffling_style") || "americano");
   const names = [...document.querySelectorAll("#players-inputs input")]
     .map((i) => i.value.trim())
     .filter(Boolean);
   try {
-    const sess = await api("/api/sessions", {
+     const sess = await api("/api/sessions", {
       method: "POST",
-      body: JSON.stringify({ sport, players: names }),
+       body: JSON.stringify({ sport, players: names, match_format: matchFormat, shuffling_style: shufflingStyle, court_count: Number(fd.get("court_count") || 1) }),
     });
     history.replaceState(null, "", `?id=${encodeURIComponent(sess.id)}`);
     $("#view-home").classList.add("hidden");
@@ -963,7 +1064,35 @@ $("#create-form").addEventListener("submit", async (e) => {
   }
 });
 
-$("#match-form").addEventListener("submit", async (e) => {
+$("#suggestion").addEventListener("click", async (e) => {
+  const button = e.target.closest("button.court-save, button.court-delete");
+  const sess = window.__session;
+  const round = sess?.current_round;
+  const card = button?.closest(".court-card");
+  if (!button || !sess || !round || !card) return;
+  const courtID = card.dataset.courtId;
+  try {
+    const method = button.classList.contains("court-delete") ? "DELETE" : "PATCH";
+    const body = method === "PATCH" ? JSON.stringify({ court_id: courtID, score_a: Number(card.querySelector("[data-score-a]").value), score_b: Number(card.querySelector("[data-score-b]").value) }) : undefined;
+    const updated = await api(`/api/sessions/${sess.id}/rounds/${round.id}/courts/${courtID}`, { method, body });
+    refreshSessionView(updated);
+    toast(method === "DELETE" ? "Court result cleared" : "Court result saved");
+  } catch (err) { toast(err.message); }
+});
+
+$("#btn-complete-round").addEventListener("click", async () => {
+  const sess = window.__session;
+  const round = sess?.current_round;
+  if (!sess || !round) return;
+  try {
+    const updated = await api(`/api/sessions/${sess.id}/rounds/${round.id}/complete`, { method: "POST", body: JSON.stringify({}) });
+    refreshSessionView(updated);
+    toast("Round completed");
+  } catch (err) { toast(err.message); }
+});
+
+const legacyMatchForm = $("#match-form");
+if (legacyMatchForm) legacyMatchForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   const sess = window.__session;
   const sug = window.__suggestion;
@@ -1029,11 +1158,7 @@ $("#btn-reshuffle").addEventListener("click", async () => {
         body: payload,
       }),
     );
-    window.__session = updated;
-    renderSuggestion(updated);
-    updateRecordMatchLabels(updated);
-    renderSessionSetup(updated);
-    clearScoreFields();
+    refreshSessionView(updated);
     toast("Lineup updated");
   } catch (err) {
     toast(err.message);

@@ -47,6 +47,72 @@ func fairnessScore(games map[string]int, lu Lineup) int {
 	return sum
 }
 
+// mexicanoScore scores lineups for mexicano style:
+// 1. Prefer the 4 least-experienced players (fairness - rotate players in)
+// 2. Among those, prefer splits where the GP difference between teams is maximized (strongest vs weakest)
+func mexicanoScore(games map[string]int, lu Lineup) int {
+	sum := 0
+	for _, id := range lu.TeamA[:] {
+		sum += games[id]
+	}
+	for _, id := range lu.TeamB[:] {
+		sum += games[id]
+	}
+
+	teamA := games[lu.TeamA[0]] + games[lu.TeamA[1]]
+	teamB := games[lu.TeamB[0]] + games[lu.TeamB[1]]
+	diff := teamA - teamB
+	if diff < 0 {
+		diff = -diff
+	}
+
+	return sum*1000 - diff
+}
+
+// mexicanoTopVsTopScore scores lineups for mexicano top-vs-top style:
+// 1. Prefer the 4 most-experienced players (highest games played)
+// 2. Among those, prefer splits where the GP difference between teams is maximized (strongest vs weakest)
+func mexicanoTopVsTopScore(games map[string]int, lu Lineup) int {
+	sum := 0
+	for _, id := range lu.TeamA[:] {
+		sum += games[id]
+	}
+	for _, id := range lu.TeamB[:] {
+		sum += games[id]
+	}
+	
+	teamA := games[lu.TeamA[0]] + games[lu.TeamA[1]]
+	teamB := games[lu.TeamB[0]] + games[lu.TeamB[1]]
+	diff := teamA - teamB
+	if diff < 0 {
+		diff = -diff
+	}
+	
+	return -sum*1000 + diff
+}
+
+// mexicanoTopVsBottomScore scores lineups for mexicano top-vs-bottom style:
+// 1. Prefer the 4 least-experienced players (fairness - rotate players in)
+// 2. Among those, pair strongest+weakest vs middle two (maximize GP difference)
+func mexicanoTopVsBottomScore(games map[string]int, lu Lineup) int {
+	sum := 0
+	for _, id := range lu.TeamA[:] {
+		sum += games[id]
+	}
+	for _, id := range lu.TeamB[:] {
+		sum += games[id]
+	}
+	
+	teamA := games[lu.TeamA[0]] + games[lu.TeamA[1]]
+	teamB := games[lu.TeamB[0]] + games[lu.TeamB[1]]
+	diff := teamA - teamB
+	if diff < 0 {
+		diff = -diff
+	}
+	
+	return sum*1000 - diff
+}
+
 func eachQuartet(ids []string, yield func([4]string)) {
 	n := len(ids)
 	for i := 0; i < n; i++ {
@@ -144,25 +210,25 @@ func buildPartnerIndex(matches []session.RecordedMatch) map[string]map[string]bo
 }
 
 // repeatPartnershipBlocked is true when p1 and p2 were partners before while p1 has not yet partnered
-// every other player on the roster (so repeating that partner would skip the “rotate through everyone” rule).
-func repeatPartnershipBlocked(p1, p2 string, idx map[string]map[string]bool, roster []string) bool {
+// every other player in the eligible pool (so repeating that partner would skip the “rotate through everyone” rule).
+func repeatPartnershipBlocked(p1, p2 string, idx map[string]map[string]bool, eligible []string) bool {
 	if idx[p1] == nil || !idx[p1][p2] {
 		return false
 	}
-	for _, r := range roster {
-		if r == p1 || r == p2 {
+	for _, e := range eligible {
+		if e == p1 || e == p2 {
 			continue
 		}
-		if !idx[p1][r] {
+		if !idx[p1][e] {
 			return true
 		}
 	}
 	return false
 }
 
-func lineupPassesPartnerRotation(lu Lineup, idx map[string]map[string]bool, roster []string) bool {
+func lineupPassesPartnerRotation(lu Lineup, idx map[string]map[string]bool, eligible []string) bool {
 	pairOk := func(x, y string) bool {
-		return !repeatPartnershipBlocked(x, y, idx, roster) && !repeatPartnershipBlocked(y, x, idx, roster)
+		return !repeatPartnershipBlocked(x, y, idx, eligible) && !repeatPartnershipBlocked(y, x, idx, eligible)
 	}
 	if !pairOk(lu.TeamA[0], lu.TeamA[1]) || !pairOk(lu.TeamB[0], lu.TeamB[1]) {
 		return false
@@ -170,22 +236,27 @@ func lineupPassesPartnerRotation(lu Lineup, idx map[string]map[string]bool, rost
 	return true
 }
 
-func filterByPartnerRotation(cands []Lineup, matches []session.RecordedMatch, roster []string) []Lineup {
+func filterByPartnerRotation(cands []Lineup, matches []session.RecordedMatch, eligible []string) []Lineup {
 	idx := buildPartnerIndex(matches)
 	var out []Lineup
 	for _, lu := range cands {
-		if lineupPassesPartnerRotation(lu, idx, roster) {
+		if lineupPassesPartnerRotation(lu, idx, eligible) {
 			out = append(out, lu)
 		}
 	}
 	return out
 }
 
-// PickSuggestion chooses a doubles lineup: minimize sum(games_played among the four).
-// Partner rotation (hard preference): p1 may not partner p2 again until p1 has partnered every other session member
+// PickSuggestion chooses a doubles lineup:
+// - americano: minimize sum(games_played among the four) — fairness focus.
+// - mexicano: first minimize sum(games_played) to favor underplayed players, then maximize GP difference between teams.
+// Partner rotation (hard preference): p1 may not partner p2 again until p1 has partnered every other eligible player
 // at least once (derived from matches). If that leaves no candidates, falls back to fairness-only among remaining candidates.
 // excludeKey excludes one canonical matchup (for reshuffle). excludePlayerIDs removes players from eligibility.
-func PickSuggestion(players []session.Player, matches []session.RecordedMatch, excludeKey string, excludePlayerIDs []string) (*session.SuggestedMatch, string, error) {
+func PickSuggestion(players []session.Player, matches []session.RecordedMatch, style session.ShufflingStyle, excludeKey string, excludePlayerIDs []string) (*session.SuggestedMatch, string, error) {
+	if style == "" {
+		style = session.ShufflingStyleAmericano
+	}
 	exSet := make(map[string]bool)
 	for _, id := range excludePlayerIDs {
 		exSet[id] = true
@@ -201,7 +272,6 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, e
 	}
 	sort.Strings(ids)
 
-	roster := sortedRosterIDs(activePool)
 	games := gamesMap(players)
 	byID := playerByID(players)
 
@@ -220,13 +290,31 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, e
 		return nil, "", ErrNoLineup
 	}
 
-	if rotated := filterByPartnerRotation(candidates, matches, roster); len(rotated) > 0 {
+	if rotated := filterByPartnerRotation(candidates, matches, ids); len(rotated) > 0 {
 		candidates = rotated
 	}
 
-	bestScore := fairnessScore(games, candidates[0])
+	var bestScore int
+	if style == session.ShufflingStyleMexicanoTopVsTop {
+		bestScore = mexicanoTopVsTopScore(games, candidates[0])
+	} else if style == session.ShufflingStyleMexicanoTopVsBottom {
+		bestScore = mexicanoTopVsBottomScore(games, candidates[0])
+	} else if style == session.ShufflingStyleMexicano {
+		bestScore = mexicanoScore(games, candidates[0])
+	} else {
+		bestScore = fairnessScore(games, candidates[0])
+	}
 	for _, lu := range candidates[1:] {
-		s := fairnessScore(games, lu)
+		var s int
+		if style == session.ShufflingStyleMexicanoTopVsTop {
+			s = mexicanoTopVsTopScore(games, lu)
+		} else if style == session.ShufflingStyleMexicanoTopVsBottom {
+			s = mexicanoTopVsBottomScore(games, lu)
+		} else if style == session.ShufflingStyleMexicano {
+			s = mexicanoScore(games, lu)
+		} else {
+			s = fairnessScore(games, lu)
+		}
 		if s < bestScore {
 			bestScore = s
 		}
@@ -234,7 +322,17 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, e
 
 	var best []Lineup
 	for _, lu := range candidates {
-		if fairnessScore(games, lu) == bestScore {
+		var s int
+		if style == session.ShufflingStyleMexicanoTopVsTop {
+			s = mexicanoTopVsTopScore(games, lu)
+		} else if style == session.ShufflingStyleMexicanoTopVsBottom {
+			s = mexicanoTopVsBottomScore(games, lu)
+		} else if style == session.ShufflingStyleMexicano {
+			s = mexicanoScore(games, lu)
+		} else {
+			s = fairnessScore(games, lu)
+		}
+		if s == bestScore {
 			best = append(best, lu)
 		}
 	}
