@@ -441,7 +441,7 @@ function renderRoundBoard(sess) {
     const scoreB = slot.score_b ?? "";
     return `<article class="court-card court-card--${escapeHtml(slot.status)}" data-court-id="${escapeHtml(slot.court_id)}">
       <div class="court-card-head"><strong>${escapeHtml(slot.court_name)}</strong><span class="court-status">${isUnused ? "Unused" : isDone ? "Saved" : "Pending"}</span></div>
-      ${isUnused ? "<p class=\"hint\">Not enough active players.</p>" : `<div class="court-teams"><div><span class="team-title">Team Left</span>${team(slot.team_a)}</div><div><span class="team-title">Team Right</span>${team(slot.team_b)}</div></div>
+      ${isUnused ? "<p class=\"hint\">Not enough active players.</p>" : `<div class="court-teams"><div><p class="team-title">Team Left</p><span class="team-players">${team(slot.team_a)}</span></div><div><p class="team-title">Team Right</p><span class="team-players">${team(slot.team_b)}</span></div></div>
       <div class="court-score-row"><label>Left <input type="number" min="0" step="1" data-score-a value="${scoreA}"></label><label>Right <input type="number" min="0" step="1" data-score-b value="${scoreB}"></label></div>
       <div class="row"><button type="button" class="court-save">${isDone ? "Update" : "Save"}</button>${isDone ? "<button type=\"button\" class=\"court-delete secondary\">Clear</button>" : ""}</div>`}
     </article>`;
@@ -480,7 +480,7 @@ function fillRestingPlayerSelect(players) {
 }
 
 function fillMinPlayers(sess) {
-  const count = isDoubles(sess) ? 6 : 6;
+  const count = isDoubles(sess) ? 6 : 2;
   const wrap = $("#players-inputs");
   if (!wrap) return;
   const currentInputs = wrap.querySelectorAll("input").length;
@@ -1335,6 +1335,12 @@ $("#copy-link").addEventListener("click", async () => {
     toast("Link copied");
   } catch (_) {
     toast(url);
+  }
+});
+
+$("#create-form")?.addEventListener("change", (e) => {
+  if (e.target.name === "match_format" || e.target.name === "sport") {
+    fillMinPlayers({ match_format: e.target.name === "match_format" ? e.target.value : ($("#match_format")?.value || "doubles"), sport: e.target.name === "sport" ? e.target.value : ($("#sport")?.value || "tennis") });
   }
 });
 
