@@ -1,5 +1,59 @@
 const $ = (sel) => document.querySelector(sel);
 
+/** AdSense Integration */
+const AdSense = {
+  scriptLoaded: false,
+  rendered: {},
+  init() {
+    const clientId = window.__ADSENSE_CLIENT_ID__;
+    if (!clientId || this.scriptLoaded) return;
+    if (document.querySelector('script[src*="adsbygoogle.js"]')) {
+      this.scriptLoaded = true;
+      return;
+    }
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${clientId}`;
+    script.crossOrigin = "anonymous";
+    document.head.appendChild(script);
+    this.scriptLoaded = true;
+  },
+  render(slotKey, containerId) {
+    if (this.rendered[containerId]) return;
+    const slot = window.__ADSENSE_SLOTS__?.[slotKey];
+    const slotId = typeof slot === "string" ? slot : slot?.id;
+    const format =
+      (typeof slot === "object" && slot?.format) || "auto";
+    const container = $(containerId);
+    if (!container) return;
+
+    if (!window.__ADSENSE_CLIENT_ID__ || !slotId) {
+      container.innerHTML = `<div class="ad-placeholder">Ad placeholder (${slotKey})</div>`;
+      this.rendered[containerId] = true;
+      return;
+    }
+
+    this.init();
+
+    const fullWidth = format === "auto" || format === "horizontal";
+    container.innerHTML = `
+      <ins class="adsbygoogle"
+           style="display:block"
+           data-ad-client="${window.__ADSENSE_CLIENT_ID__}"
+           data-ad-slot="${slotId}"
+           data-ad-format="${format}"
+           ${fullWidth ? 'data-full-width-responsive="true"' : ""}></ins>
+    `;
+
+    try {
+      (window.adsbygoogle = window.adsbygoogle || []).push({});
+    } catch (e) {
+      console.error("AdSense push error:", e);
+    }
+    this.rendered[containerId] = true;
+  },
+};
+
 /** Base URL for API (empty = same origin). Set in config.js or by Netlify build. */
 function apiBase() {
   const b =
@@ -1347,6 +1401,7 @@ function goHome() {
         $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
+        AdSense.render('home', 'ad-home');
       })
       .catch(() => {
         $("#view-loading").classList.add("hidden");
@@ -1354,6 +1409,7 @@ function goHome() {
         $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
+        AdSense.render('home', 'ad-home');
         toast(
           "Could not reach the server yet. Wait a moment and try New session again.",
         );
@@ -1361,6 +1417,7 @@ function goHome() {
   } else {
     $("#view-home").classList.remove("hidden");
     playerRows(6);
+    AdSense.render('home', 'ad-home');
   }
 }
 
@@ -1510,6 +1567,8 @@ function boot() {
         $("#view-loading").setAttribute("aria-busy", "false");
         $("#view-not-found")?.classList.add("hidden");
         $("#view-session").classList.remove("hidden");
+        AdSense.render('session_mid', 'ad-session-mid');
+        AdSense.render('session_bottom', 'ad-session-bottom');
       })
       .catch((e) => {
         $("#view-loading").classList.add("hidden");
@@ -1542,6 +1601,7 @@ function boot() {
         $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
+        AdSense.render('home', 'ad-home');
       })
       .catch(() => {
         $("#view-loading").classList.add("hidden");
@@ -1549,12 +1609,14 @@ function boot() {
         $("#view-not-found")?.classList.add("hidden");
         $("#view-home").classList.remove("hidden");
         playerRows(6);
+        AdSense.render('home', 'ad-home');
         toast(
           "Could not reach the server yet. Check the API URL or wait and refresh.",
         );
       });
   } else {
     playerRows(6);
+    AdSense.render('home', 'ad-home');
   }
 }
 
