@@ -3,6 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="google-adsense-account"
+      content="ca-pub-6796806853565782"
+    />
+    <script
+      async
+      src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6796806853565782"
+      crossorigin="anonymous"
+    ></script>
     <title>Keep Swinging</title>
     <link rel="stylesheet" href="/style.css" />
   </head>
@@ -75,22 +84,22 @@
             <option value="doubles">Doubles (4 on court)</option>
             <option value="singles">Singles (1v1)</option>
           </select>
-           <label>Shuffling style</label>
+          <label>Shuffling style</label>
           <select name="shuffling_style">
             <option value="americano">Americano (free-for-all)</option>
             <option value="mexicano">Mexicano (team-based)</option>
-           </select>
-           <label for="create-court-count">Courts</label>
-           <select id="create-court-count" name="court_count">
-             <option value="1">1 court</option>
-             <option value="2">2 courts</option>
-             <option value="3">3 courts</option>
-             <option value="4">4 courts</option>
-             <option value="5">5 courts</option>
-             <option value="6">6 courts</option>
-             <option value="7">7 courts</option>
-             <option value="8">8 courts</option>
-           </select>
+          </select>
+          <label for="create-court-count">Courts</label>
+          <select id="create-court-count" name="court_count">
+            <option value="1">1 court</option>
+            <option value="2">2 courts</option>
+            <option value="3">3 courts</option>
+            <option value="4">4 courts</option>
+            <option value="5">5 courts</option>
+            <option value="6">6 courts</option>
+            <option value="7">7 courts</option>
+            <option value="8">8 courts</option>
+          </select>
           <label>Players (2–16)</label>
           <div id="players-inputs"></div>
           <button type="button" class="secondary" id="add-player">
@@ -98,7 +107,9 @@
           </button>
           <button type="submit">Start session</button>
         </form>
+        <div id="ad-home" class="ad-container"></div>
       </div>
+
 
       <div id="view-session" class="panel hidden">
         <div class="session-head">
@@ -114,25 +125,28 @@
         <section class="session-block session-block--first">
            <h2 class="section-heading" id="suggestion-heading">Suggested round</h2>
            <div id="suggestion" class="card"></div>
-          <label class="resting-label"
-            >Resting players <span class="optional-tag">(optional)</span></label
-          >
-          <div
-            id="resting-players"
-            class="resting-players"
-            role="group"
-            aria-label="Resting players"
-          ></div>
-          <p class="hint">Tap to select who sits out. Applies to the current round only.</p>
+           <label class="resting-label"
+             >Resting players <span class="optional-tag">(optional)</span></label
+           >
+           <div
+             id="resting-players"
+             class="resting-players"
+             role="group"
+             aria-label="Resting players"
+           ></div>
+           <p class="hint">Tap to select who sits out. Applies to the current round only.</p>
            <div class="row">
              <button type="button" id="btn-reshuffle">Apply rest &amp; reshuffle</button>
              <button type="button" id="btn-add-court" class="secondary">Add court</button>
            </div>
            <button type="button" id="btn-complete-round" class="hidden">Complete round</button>
-        </section>
+         </section>
 
-        <section class="session-block">
-          <h2 class="section-heading">Standings</h2>
+
+ 
+         <section class="session-block">
+           <h2 class="section-heading">Standings</h2>
+
           <div
             class="standings-tabs"
             role="tablist"
@@ -218,6 +232,7 @@
         </section>
 
         <section class="session-block">
+          <div id="ad-session-mid" class="ad-container"></div>
           <h2 class="section-heading">History</h2>
 
           <ul id="history" class="history"></ul>
@@ -232,12 +247,14 @@
         </section>
 
         <section class="session-block">
-          <h2 class="section-heading">Session setup</h2>
-          <div
-            class="standings-tabs"
-            role="tablist"
-            aria-label="Session setup tabs"
-          >
+           <h2 class="section-heading">Session setup</h2>
+           <div id="ad-session-bottom" class="ad-container"></div>
+           <div
+             class="standings-tabs"
+             role="tablist"
+             aria-label="Session setup tabs"
+           >
+
             <button
               type="button"
               class="standings-tab standings-tab--active"
@@ -349,11 +366,14 @@
         <span class="version-pill" title="App version">v0.0.3</span>
         <span class="footer-divider" aria-hidden="true"></span>
         <span class="footer-tagline">Doubles &amp; singles for tennis &amp; padel</span>
+        <span class="footer-divider" aria-hidden="true"></span>
+        <a class="footer-link" href="/privacy.html">Privacy Policy</a>
       </div>
     </footer>
 
     <p id="toast" class="toast hidden" role="status"></p>
     <script src="/config.js"></script>
+    <script src="/adsense.js"></script>
     <script src="/app.js"></script>
   </body>
 </html>

@@ -449,6 +449,22 @@ button.secondary {
   color: #94a3b8;
 }
 
+.ad-container {
+  margin: 1rem 0;
+  min-height: 5rem;
+}
+
+.ad-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 5rem;
+  border: 1px dashed #cbd5e1;
+  border-radius: 0.5rem;
+  color: #94a3b8;
+  font-size: 0.8125rem;
+}
+
 .history-actions {
   display: flex;
   flex-wrap: wrap;
@@ -846,6 +862,17 @@ th {
   font-size: 0.78rem;
   color: #64748b;
   font-weight: 500;
+}
+
+.footer-link {
+  font-size: 0.78rem;
+  color: #15803d;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.footer-link:hover {
+  text-decoration: underline;
 }
 
 .toast {
