@@ -11,6 +11,6 @@
 
 [[redirects]]
   from = "https://keep-swinging.netlify.app/*"
-  to = "https://keep-swinging.site"
+  to = "https://keep-swinging.site/:splat"
   status = 301
   force = true
