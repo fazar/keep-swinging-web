@@ -151,6 +151,84 @@ func PickRound(players []session.Player, matches []session.RecordedMatch, style 
 	return round, roundKey(best), nil
 }
 
+// PickRoundWithRest builds a round that excludes resting players and records
+// those ids on the returned round.
+func PickRoundWithRest(players []session.Player, matches []session.RecordedMatch, style session.ShufflingStyle, courts []session.Court, format session.MatchFormat, excludeKey string, restingIDs []string) (*session.Round, string, error) {
+	round, key, err := PickRound(players, matches, style, courts, format, excludeKey, restingIDs)
+	if err != nil {
+		return nil, "", err
+	}
+	round.RestingPlayerIDs = append([]string(nil), restingIDs...)
+	return round, key, nil
+}
+
+// PickCourtPlayers chooses one court lineup using only active players that are
+// neither resting nor already assigned, honoring fairness and partner rotation.
+func PickCourtPlayers(players []session.Player, matches []session.RecordedMatch, style session.ShufflingStyle, format session.MatchFormat, restingIDs, assignedIDs []string) ([]session.Player, []session.Player, error) {
+	if style == "" {
+		style = session.ShufflingStyleAmericano
+	}
+	blocked := make(map[string]bool, len(restingIDs)+len(assignedIDs))
+	for _, id := range restingIDs {
+		blocked[id] = true
+	}
+	for _, id := range assignedIDs {
+		blocked[id] = true
+	}
+	eligible := filterPlayers(activeShufflePlayers(players), blocked)
+	perCourt := 4
+	if format == session.MatchFormatSingles {
+		perCourt = 2
+	}
+	if len(eligible) < perCourt {
+		return nil, nil, ErrNoLineup
+	}
+	ids := make([]string, len(eligible))
+	for i := range eligible {
+		ids[i] = eligible[i].ID
+	}
+	sort.Strings(ids)
+	byID := playerByID(players)
+	rotation := buildPartnerIndex(matches)
+
+	var cands []roundLineup
+	if format == session.MatchFormatSingles {
+		for i := 0; i < len(ids); i++ {
+			for j := i + 1; j < len(ids); j++ {
+				cands = append(cands, roundLineup{teamA: [2]string{ids[i], ""}, teamB: [2]string{ids[j], ""}})
+			}
+		}
+	} else {
+		eachQuartet(ids, func(q [4]string) {
+			for _, lu := range lineupsForQuartet(q) {
+				if lineupPassesPartnerRotation(Lineup{TeamA: lu.TeamA, TeamB: lu.TeamB}, rotation, ids) {
+					cands = append(cands, roundLineup{teamA: lu.TeamA, teamB: lu.TeamB})
+				}
+			}
+		})
+		if len(cands) == 0 {
+			eachQuartet(ids, func(q [4]string) {
+				for _, lu := range lineupsForQuartet(q) {
+					cands = append(cands, roundLineup{teamA: lu.TeamA, teamB: lu.TeamB})
+				}
+			})
+		}
+	}
+	if len(cands) == 0 {
+		return nil, nil, ErrNoLineup
+	}
+	bestIdx := 0
+	bestScore := roundScore(cands[:1], byID, style)
+	for i := 1; i < len(cands); i++ {
+		if s := roundScore(cands[i:i+1], byID, style); s < bestScore {
+			bestScore = s
+			bestIdx = i
+		}
+	}
+	chosen := cands[bestIdx]
+	return playersForIDs(byID, chosen.teamA[:]), playersForIDs(byID, chosen.teamB[:]), nil
+}
+
 func roundScore(lineups []roundLineup, byID map[string]session.Player, style session.ShufflingStyle) int {
 	sum := 0
 	for _, lu := range lineups {

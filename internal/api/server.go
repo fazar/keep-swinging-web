@@ -38,6 +38,7 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("POST /api/sessions/{id}/rounds", s.handleCreateRound)
 	mux.HandleFunc("PATCH /api/sessions/{id}/rounds/{round_id}/courts/{court_id}", s.handlePatchRoundCourt)
 	mux.HandleFunc("DELETE /api/sessions/{id}/rounds/{round_id}/courts/{court_id}", s.handleDeleteRoundCourt)
+	mux.HandleFunc("DELETE /api/sessions/{id}/courts/{court_id}", s.handleDeleteSessionCourt)
 	mux.HandleFunc("POST /api/sessions/{id}/rounds/{round_id}/complete", s.handleCompleteRound)
 	mux.HandleFunc("POST /api/sessions/{id}/reset", s.handleResetScores)
 	mux.HandleFunc("PATCH /api/sessions/{id}/config", s.handlePatchSessionConfig)
@@ -430,6 +431,7 @@ func (s *Server) handlePatchMatchScores(w http.ResponseWriter, r *http.Request) 
 
 type reshuffleBody struct {
 	ExcludePlayerIDs []string `json:"exclude_player_ids"`
+	RestingPlayerIDs []string `json:"resting_player_ids"`
 }
 
 func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
@@ -456,7 +458,11 @@ func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		round, key, pickErr := scheduler.PickRound(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, sess.SuggestionKey, body.ExcludePlayerIDs)
+		if err := validateRestingIDs(sess.Players, body.RestingPlayerIDs); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		round, key, pickErr := scheduler.PickRoundWithRest(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, sess.SuggestionKey, body.RestingPlayerIDs)
 		if pickErr != nil {
 			writeError(w, http.StatusBadRequest, "no alternate round available")
 			return
@@ -820,7 +826,8 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 		sess.HideInactiveFromMatches = body.HideInactiveFromMatches
 	}
 	if hasCourtCount || hasCourts {
-		count := len(sess.Courts)
+		oldCourts := sess.Courts
+		count := len(oldCourts)
 		if hasCourtCount {
 			count = *body.CourtCount
 		}
@@ -828,11 +835,23 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 			count = 1
 		}
 		if hasCourts {
-			names := body.Courts
-			sess.Courts = makeCourtsWithNames(names)
-		} else {
-			sess.Courts = resizeCourts(sess.Courts, count)
+			count = len(body.Courts)
 		}
+		if hasCourtCount && !hasCourts && count < len(oldCourts) {
+			writeError(w, http.StatusBadRequest, "remove courts with DELETE /api/sessions/{id}/courts/{court_id}")
+			return
+		}
+		var next []session.Court
+		if hasCourts {
+			next = makeCourtsWithNames(body.Courts)
+		} else {
+			next = growCourts(oldCourts, count)
+		}
+		if err := scheduleAddedCourts(sess, oldCourts, next); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		sess.Courts = next
 	}
 	session.EnsureHideInactiveDefaults(sess)
 
@@ -1072,13 +1091,117 @@ func makeCourtsWithNames(names []string) []session.Court {
 	return courts
 }
 
-func resizeCourts(existing []session.Court, count int) []session.Court {
-	courts := makeCourts(count)
-	for i := 0; i < len(existing) && i < len(courts); i++ {
-		courts[i].ID = existing[i].ID
-		courts[i].Name = existing[i].Name
+func (s *Server) handleDeleteSessionCourt(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, r.PathValue("id"), w)
+	if sess == nil || err != nil {
+		return
 	}
-	return courts
+	if err := removeSessionCourt(sess, r.PathValue("court_id")); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.Store.Save(ctx, sess); err != nil {
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, sess)
+}
+
+func removeSessionCourt(sess *session.Session, courtID string) error {
+	if sess == nil {
+		return errors.New("no session")
+	}
+	idx := -1
+	for i, c := range sess.Courts {
+		if c.ID == courtID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return errors.New("unknown court")
+	}
+	if len(sess.Courts) <= 1 {
+		return errors.New("cannot remove the last court")
+	}
+	sess.Courts = slices.Delete(sess.Courts, idx, idx+1)
+	if sess.CurrentRound != nil {
+		for i := range sess.CurrentRound.Slots {
+			if sess.CurrentRound.Slots[i].CourtID == courtID {
+				sess.CurrentRound.Slots = slices.Delete(sess.CurrentRound.Slots, i, i+1)
+				break
+			}
+		}
+	}
+	rebuildRoundStats(sess)
+	return nil
+}
+
+func growCourts(existing []session.Court, count int) []session.Court {
+	next := append([]session.Court(nil), existing...)
+	for len(next) < count {
+		id := nextCourtID(next)
+		next = append(next, session.Court{ID: id, Name: "Court " + strings.TrimPrefix(id, "court-")})
+	}
+	return next
+}
+
+func nextCourtID(existing []session.Court) string {
+	used := make(map[string]bool, len(existing))
+	for _, c := range existing {
+		used[c.ID] = true
+	}
+	for i := 1; i <= 8; i++ {
+		id := fmt.Sprintf("court-%d", i)
+		if !used[id] {
+			return id
+		}
+	}
+	return fmt.Sprintf("court-%d", len(existing)+1)
+}
+
+func assignedPlayerIDs(round *session.Round) []string {
+	if round == nil {
+		return nil
+	}
+	var out []string
+	for _, slot := range round.Slots {
+		for _, p := range slot.TeamA {
+			out = append(out, p.ID)
+		}
+		for _, p := range slot.TeamB {
+			out = append(out, p.ID)
+		}
+	}
+	return out
+}
+
+func scheduleAddedCourts(sess *session.Session, oldCourts, next []session.Court) error {
+	if sess == nil || sess.CurrentRound == nil || sess.CurrentRound.Status != session.RoundStatusOpen {
+		return nil
+	}
+	if len(next) <= len(oldCourts) {
+		return nil
+	}
+	assigned := assignedPlayerIDs(sess.CurrentRound)
+	for i := len(oldCourts); i < len(next); i++ {
+		teamA, teamB, err := scheduler.PickCourtPlayers(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.MatchFormat, sess.CurrentRound.RestingPlayerIDs, assigned)
+		if err != nil {
+			return errors.New("not enough available players to add a court for this round")
+		}
+		for _, p := range append(append([]session.Player{}, teamA...), teamB...) {
+			assigned = append(assigned, p.ID)
+		}
+		sess.CurrentRound.Slots = append(sess.CurrentRound.Slots, session.RoundSlot{
+			CourtID:   next[i].ID,
+			CourtName: next[i].Name,
+			Status:    session.RoundSlotStatusPending,
+			TeamA:     teamA,
+			TeamB:     teamB,
+		})
+	}
+	return nil
 }
 
 func playerIDSet(players []session.Player) map[string]bool {
@@ -1286,6 +1409,28 @@ func distinctFour(ids []string) bool {
 		s[id] = true
 	}
 	return true
+}
+
+func validateRestingIDs(players []session.Player, ids []string) error {
+	byID := make(map[string]session.Player, len(players))
+	for _, p := range players {
+		byID[p.ID] = p
+	}
+	seen := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		p, ok := byID[id]
+		if !ok {
+			return errors.New("unknown resting player id")
+		}
+		if p.Inactive {
+			return errors.New("resting player is inactive")
+		}
+		if seen[id] {
+			return errors.New("duplicate resting player id")
+		}
+		seen[id] = true
+	}
+	return nil
 }
 
 func parseSport(v string) (session.Sport, bool) {

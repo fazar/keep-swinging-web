@@ -114,14 +114,19 @@
         <section class="session-block session-block--first">
            <h2 class="section-heading" id="suggestion-heading">Suggested round</h2>
            <div id="suggestion" class="card"></div>
-          <label class="resting-label" for="resting-player"
-            >Resting player <span class="optional-tag">(optional)</span></label
+          <label class="resting-label"
+            >Resting players <span class="optional-tag">(optional)</span></label
           >
-          <select id="resting-player" autocomplete="off">
-            <option value="">— None —</option>
-          </select>
+          <div
+            id="resting-players"
+            class="resting-players"
+            role="group"
+            aria-label="Resting players"
+          ></div>
+          <p class="hint">Tap to select who sits out. Applies to the current round only.</p>
            <div class="row">
-             <button type="button" id="btn-reshuffle">Reshuffle</button>
+             <button type="button" id="btn-reshuffle">Apply rest &amp; reshuffle</button>
+             <button type="button" id="btn-add-court" class="secondary">Add court</button>
            </div>
            <button type="button" id="btn-complete-round" class="hidden">Complete round</button>
         </section>
