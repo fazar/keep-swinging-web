@@ -94,11 +94,12 @@ type RoundSlot struct {
 
 // Round is a synchronized set of court assignments and their results.
 type Round struct {
-	ID        string      `json:"id"`
-	Status    RoundStatus `json:"status"`
-	Slots     []RoundSlot `json:"slots"`
-	CreatedAt time.Time   `json:"created_at"`
-	ClosedAt  *time.Time  `json:"closed_at,omitempty"`
+	ID               string      `json:"id"`
+	Status           RoundStatus `json:"status"`
+	Slots            []RoundSlot `json:"slots"`
+	RestingPlayerIDs []string    `json:"resting_player_ids,omitempty"`
+	CreatedAt        time.Time   `json:"created_at"`
+	ClosedAt         *time.Time  `json:"closed_at,omitempty"`
 }
 
 // RecordedMatch is a finished doubles result.

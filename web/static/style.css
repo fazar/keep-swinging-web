@@ -244,20 +244,18 @@ button.secondary {
   gap: 0.75rem;
 }
 
-.court-teams {
-  margin: 0.85rem 0;
-}
-
 .court-status {
   color: #64748b;
   font-size: 0.78rem;
   text-transform: uppercase;
 }
 
+.court-teams {
+  margin: 0.85rem 0;
+}
+
 .court-teams > div {
   flex: 1;
-  display: flex;
-  flex-direction: column;
 }
 
 .court-score-row label {
@@ -293,27 +291,12 @@ button.secondary {
   margin-bottom: 0;
 }
 
-.team-players {
-  font-weight: 600;
-  line-height: 1.4;
-  display: block;
-  margin-bottom: 0.5rem;
-}
-
 .team-title {
   font-size: 0.75rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: #64748b;
   margin-bottom: 0.35rem;
-  display: block;
-  flex: 0 0 auto;
-}
-
-.court-teams > div {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
 }
 
 .suggestion-loading {
@@ -430,6 +413,35 @@ button.secondary {
 
 .resting-label {
   margin-top: 0.75rem;
+}
+
+.resting-players {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.5rem;
+  margin: 0.35rem 0 0.5rem;
+}
+
+.resting-player-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.65rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 0.875rem;
+  user-select: none;
+}
+
+.resting-player-option:has(input:checked) {
+  border-color: #0f172a;
+  background: #e2e8f0;
+}
+
+.resting-player-option input {
+  margin: 0;
 }
 
 .optional-tag {

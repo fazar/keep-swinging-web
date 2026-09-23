@@ -112,6 +112,52 @@ func TestPickRoundPreservesDoublesPartnerRotationAcrossCourts(t *testing.T) {
 	}
 }
 
+func TestPickRoundWithRestExcludesRestingPlayers(t *testing.T) {
+	players := roundPlayers(8, 0)
+	round, _, err := PickRoundWithRest(players, nil, session.ShufflingStyleAmericano, courts(2), session.MatchFormatDoubles, "", []string{"p1", "p2"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(round.RestingPlayerIDs) != 2 {
+		t.Fatalf("expected resting ids recorded: %#v", round.RestingPlayerIDs)
+	}
+	if round.Slots[1].Status != session.RoundSlotStatusUnused {
+		t.Fatalf("expected second court unused with six eligible: %#v", round.Slots)
+	}
+	for _, slot := range round.Slots {
+		for _, p := range append(append([]session.Player{}, slot.TeamA...), slot.TeamB...) {
+			if p.ID == "p1" || p.ID == "p2" {
+				t.Fatalf("resting player assigned: %s", p.ID)
+			}
+		}
+	}
+}
+
+func TestPickCourtPlayersUsesOnlyUnassigned(t *testing.T) {
+	players := roundPlayers(8, 0)
+	teamA, teamB, err := PickCourtPlayers(players, nil, session.ShufflingStyleAmericano, session.MatchFormatDoubles, nil, []string{"p1", "p2", "p3", "p4"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, p := range append(append([]session.Player{}, teamA...), teamB...) {
+		if p.ID <= "p4" {
+			t.Fatalf("assigned player reused: %s", p.ID)
+		}
+		seen[p.ID] = true
+	}
+	if len(seen) != 4 {
+		t.Fatalf("expected four players, got %d", len(seen))
+	}
+}
+
+func TestPickCourtPlayersErrorsWhenShort(t *testing.T) {
+	players := roundPlayers(6, 0)
+	if _, _, err := PickCourtPlayers(players, nil, session.ShufflingStyleAmericano, session.MatchFormatDoubles, nil, []string{"p1", "p2", "p3", "p4"}); err == nil {
+		t.Fatal("expected error when fewer than four players remain")
+	}
+}
+
 func roundPlayers(n, games int) []session.Player {
 	players := make([]session.Player, n)
 	for i := range players {

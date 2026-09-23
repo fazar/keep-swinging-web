@@ -409,7 +409,7 @@ function refreshSessionView(sess) {
   if (isRoundSession(sess)) renderRoundBoard(sess);
   else renderSuggestion(sess);
   renderHistory([...sess.matches, ...roundMatches(sess)], sess.players, sess);
-  fillRestingPlayerSelect(sess.players);
+  fillRestingPlayers(sess);
   renderSessionSetup(sess);
   fillMinPlayers(sess);
   setLineupControlsBusy(false);
@@ -431,7 +431,7 @@ function renderRoundBoard(sess) {
   }
   let hasCompleted = false;
   let pending = false;
-  el.innerHTML = `<div class="round-board">${(round.slots || []).map((slot) => {
+  const cards = (round.slots || []).map((slot) => {
     const isUnused = slot.status === "unused";
     const isDone = slot.status === "completed";
     hasCompleted ||= isDone;
@@ -439,13 +439,21 @@ function renderRoundBoard(sess) {
     const team = (players) => (players || []).map((p) => escapeHtml(p.name)).join(" · ");
     const scoreA = slot.score_a ?? "";
     const scoreB = slot.score_b ?? "";
+    const canRemoveCourt = (sess.courts || []).length > 1;
     return `<article class="court-card court-card--${escapeHtml(slot.status)}" data-court-id="${escapeHtml(slot.court_id)}">
       <div class="court-card-head"><strong>${escapeHtml(slot.court_name)}</strong><span class="court-status">${isUnused ? "Unused" : isDone ? "Saved" : "Pending"}</span></div>
-      ${isUnused ? "<p class=\"hint\">Not enough active players.</p>" : `<div class="court-teams"><div><p class="team-title">Team Left</p><span class="team-players">${team(slot.team_a)}</span></div><div><p class="team-title">Team Right</p><span class="team-players">${team(slot.team_b)}</span></div></div>
+      ${isUnused ? "<p class=\"hint\">Not enough active players.</p>" : `<div class="court-teams"><div><span class="team-title">Team Left</span>${team(slot.team_a)}</div><div><span class="team-title">Team Right</span>${team(slot.team_b)}</div></div>
       <div class="court-score-row"><label>Left <input type="number" min="0" step="1" data-score-a value="${scoreA}"></label><label>Right <input type="number" min="0" step="1" data-score-b value="${scoreB}"></label></div>
-      <div class="row"><button type="button" class="court-save">${isDone ? "Update" : "Save"}</button>${isDone ? "<button type=\"button\" class=\"court-delete secondary\">Clear</button>" : ""}</div>`}
+      <div class="row"><button type="button" class="court-save">${isDone ? "Update" : "Save"}</button>${isDone ? "<button type=\"button\" class=\"court-delete secondary\">Clear</button>" : ""}${canRemoveCourt ? "<button type=\"button\" class=\"court-remove secondary\">Remove court</button>" : ""}</div>`}
     </article>`;
-  }).join("")}</div>`;
+  }).join("");
+  const restingNames = (round.resting_player_ids || [])
+    .map((id) => (sess.players || []).find((p) => p.id === id)?.name)
+    .filter(Boolean);
+  const restingHtml = restingNames.length
+    ? `<p class="hint">Resting: ${restingNames.map(escapeHtml).join(" · ")}</p>`
+    : "";
+  el.innerHTML = `<div class="round-board">${cards}${restingHtml}</div>`;
   if (complete) {
     complete.classList.toggle("hidden", !round || pending || !hasCompleted);
     complete.disabled = pending || !hasCompleted;
@@ -458,29 +466,38 @@ function renderCourtConfig(sess) {
   wrap.innerHTML = sess.courts.map((court) => `<label>Court name<input type="text" data-court-name="${escapeHtml(court.id)}" value="${escapeHtml(court.name)}" required></label>`).join("");
 }
 
-function fillRestingPlayerSelect(players) {
-  const sel = document.getElementById("resting-player");
-  if (!sel) return;
-  const prev = sel.value;
-  sel.innerHTML = '<option value="">— None —</option>';
-  const sorted = [...shuffleActivePlayers(players)].sort((a, b) =>
+function fillRestingPlayers(sess) {
+  const wrap = document.getElementById("resting-players");
+  if (!wrap) return;
+  const resting = new Set(sess?.current_round?.resting_player_ids || []);
+  wrap.innerHTML = "";
+  const sorted = [...shuffleActivePlayers(sess?.players || [])].sort((a, b) =>
     a.name.localeCompare(b.name),
   );
-  for (const p of sorted) {
-    const opt = document.createElement("option");
-    opt.value = p.id;
-    opt.textContent = p.name;
-    sel.appendChild(opt);
+  if (!sorted.length) {
+    wrap.innerHTML = '<span class="hint">No active players.</span>';
+    return;
   }
-  if (prev && [...sel.options].some((o) => o.value === prev)) {
-    sel.value = prev;
-  } else {
-    sel.value = "";
+  for (const p of sorted) {
+    const label = document.createElement("label");
+    label.className = "resting-player-option";
+    const checked = resting.has(p.id) ? " checked" : "";
+    label.innerHTML = `<input type="checkbox" class="resting-player-checkbox" data-player-id="${escapeHtml(p.id)}"${checked}><span>${escapeHtml(p.name)}</span>`;
+    wrap.appendChild(label);
   }
 }
 
+function selectedRestingPlayerIds() {
+  return [
+    ...document.querySelectorAll("#resting-players .resting-player-checkbox"),
+  ]
+    .filter((box) => box.checked)
+    .map((box) => box.dataset.playerId)
+    .filter(Boolean);
+}
+
 function fillMinPlayers(sess) {
-  const count = isDoubles(sess) ? 6 : 2;
+  const count = isDoubles(sess) ? 6 : 6;
   const wrap = $("#players-inputs");
   if (!wrap) return;
   const currentInputs = wrap.querySelectorAll("input").length;
@@ -1065,13 +1082,20 @@ $("#create-form").addEventListener("submit", async (e) => {
 });
 
 $("#suggestion").addEventListener("click", async (e) => {
-  const button = e.target.closest("button.court-save, button.court-delete");
+  const button = e.target.closest("button.court-save, button.court-delete, button.court-remove");
   const sess = window.__session;
   const round = sess?.current_round;
   const card = button?.closest(".court-card");
   if (!button || !sess || !round || !card) return;
   const courtID = card.dataset.courtId;
   try {
+    if (button.classList.contains("court-remove")) {
+      if (!window.confirm("Remove this court? A saved result on it will be discarded.")) return;
+      const updated = await api(`/api/sessions/${sess.id}/courts/${courtID}`, { method: "DELETE" });
+      refreshSessionView(updated);
+      toast("Court removed");
+      return;
+    }
     const method = button.classList.contains("court-delete") ? "DELETE" : "PATCH";
     const body = method === "PATCH" ? JSON.stringify({ court_id: courtID, score_a: Number(card.querySelector("[data-score-a]").value), score_b: Number(card.querySelector("[data-score-b]").value) }) : undefined;
     const updated = await api(`/api/sessions/${sess.id}/rounds/${round.id}/courts/${courtID}`, { method, body });
@@ -1144,11 +1168,11 @@ if (legacyMatchForm) legacyMatchForm.addEventListener("submit", async (e) => {
 $("#btn-reshuffle").addEventListener("click", async () => {
   const sess = window.__session;
   if (!sess) return;
-  const sel = document.getElementById("resting-player");
-  const rid = sel && sel.value ? String(sel.value).trim() : "";
-  const idSet = new Set(sess.players.map((p) => p.id));
-  const excludeIds = rid && idSet.has(rid) ? [rid] : [];
-  const payload = JSON.stringify({ exclude_player_ids: excludeIds });
+  const restingIds = selectedRestingPlayerIds();
+  const payload = JSON.stringify({
+    resting_player_ids: restingIds,
+    exclude_player_ids: restingIds,
+  });
   showSuggestionLoading("Reshuffling lineup…");
   setLineupControlsBusy(true);
   try {
@@ -1166,6 +1190,26 @@ $("#btn-reshuffle").addEventListener("click", async () => {
     updateRecordMatchLabels(sess);
   } finally {
     setLineupControlsBusy(false);
+  }
+});
+
+$("#btn-add-court")?.addEventListener("click", async () => {
+  const sess = window.__session;
+  if (!sess) return;
+  const count = (sess.courts || []).length;
+  if (count >= 8) {
+    toast("Maximum 8 courts");
+    return;
+  }
+  try {
+    const updated = await api(`/api/sessions/${sess.id}/config`, {
+      method: "PATCH",
+      body: JSON.stringify({ court_count: count + 1 }),
+    });
+    refreshSessionView(updated);
+    toast("Court added");
+  } catch (err) {
+    toast(err.message);
   }
 });
 
@@ -1335,12 +1379,6 @@ $("#copy-link").addEventListener("click", async () => {
     toast("Link copied");
   } catch (_) {
     toast(url);
-  }
-});
-
-$("#create-form")?.addEventListener("change", (e) => {
-  if (e.target.name === "match_format" || e.target.name === "sport") {
-    fillMinPlayers({ match_format: e.target.name === "match_format" ? e.target.value : ($("#match_format")?.value || "doubles"), sport: e.target.name === "sport" ? e.target.value : ($("#sport")?.value || "tennis") });
   }
 });
 
