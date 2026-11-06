@@ -36,6 +36,7 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PATCH /api/sessions/{id}/matches/{match_index}", s.handlePatchMatchScores)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
 	mux.HandleFunc("POST /api/sessions/{id}/rounds", s.handleCreateRound)
+	mux.HandleFunc("PUT /api/sessions/{id}/rest-next", s.handlePutRestNext)
 	mux.HandleFunc("PATCH /api/sessions/{id}/rounds/{round_id}/courts/{court_id}", s.handlePatchRoundCourt)
 	mux.HandleFunc("DELETE /api/sessions/{id}/rounds/{round_id}/courts/{court_id}", s.handleDeleteRoundCourt)
 	mux.HandleFunc("DELETE /api/sessions/{id}/courts/{court_id}", s.handleDeleteSessionCourt)
@@ -432,6 +433,59 @@ func (s *Server) handlePatchMatchScores(w http.ResponseWriter, r *http.Request) 
 type reshuffleBody struct {
 	ExcludePlayerIDs []string `json:"exclude_player_ids"`
 	RestingPlayerIDs []string `json:"resting_player_ids"`
+}
+
+type restNextBody struct {
+	PlayerIDs []string `json:"player_ids"`
+}
+
+// validatePlannedRest checks planned resting player IDs and ensures at least
+// one full court can still be filled.
+func validatePlannedRest(sess *session.Session, ids []string) error {
+	if err := validateRestingIDs(sess.Players, ids); err != nil {
+		return err
+	}
+	perCourt := 4
+	if sess.MatchFormat == session.MatchFormatSingles {
+		perCourt = 2
+	}
+	active := 0
+	for _, p := range sess.Players {
+		if !p.Inactive {
+			active++
+		}
+	}
+	if active-len(ids) < perCourt {
+		return errors.New("too many resting players: need at least one full court")
+	}
+	return nil
+}
+
+func (s *Server) handlePutRestNext(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, r.PathValue("id"), w)
+	if sess == nil || err != nil {
+		return
+	}
+	if !session.UsesRoundModel(sess) {
+		writeError(w, http.StatusBadRequest, "legacy sessions use the match endpoint")
+		return
+	}
+	var body restNextBody
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	if err := validatePlannedRest(sess, body.PlayerIDs); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	sess.RestNextPlayerIDs = body.PlayerIDs
+	if err := s.Store.Save(ctx, sess); err != nil {
+		s.Logger.Error("save session", "err", err)
+		writeError(w, http.StatusInternalServerError, "could not save session")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string][]string{"rest_next_player_ids": sess.RestNextPlayerIDs})
 }
 
 func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {

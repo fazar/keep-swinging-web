@@ -123,6 +123,9 @@ type Session struct {
 	CurrentRound  *Round          `json:"current_round,omitempty"`
 	Rounds        []Round         `json:"rounds,omitempty"`
 	SuggestionKey string          `json:"suggestion_key,omitempty"` // canonical lineup key for reshuffle exclusion
+	// RestNextPlayerIDs lists players who plan to sit out the NEXT round;
+	// consumed (and cleared) when the next round is created.
+	RestNextPlayerIDs []string       `json:"rest_next_player_ids,omitempty"`
 	// SitOutScore is multiplied by (leader GP − your GP) in standings parity.
 	// Omitted/absent in storage ⇒ UI uses DefaultSitOutScore(sport).
 	SitOutScore    *float64       `json:"sit_out_score,omitempty"`

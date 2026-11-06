@@ -1,6 +1,28 @@
 package session
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
+
+func TestRestNextPlayerIDsJSONRoundTrip(t *testing.T) {
+	sess := Session{ID: "s", RestNextPlayerIDs: []string{"a"}}
+	data, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"rest_next_player_ids":["a"]`) {
+		t.Fatalf("field not serialized: %s", data)
+	}
+	var back Session
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if len(back.RestNextPlayerIDs) != 1 || back.RestNextPlayerIDs[0] != "a" {
+		t.Fatalf("field not deserialized: %#v", back)
+	}
+}
 
 func TestDefaultSitOutScore(t *testing.T) {
 	if g := DefaultSitOutScore(SportTennis); g != 2 {

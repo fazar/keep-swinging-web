@@ -22,6 +22,31 @@ func TestValidateRestingIDsRejectsUnknownInactiveAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestValidatePlannedRest(t *testing.T) {
+	players := []session.Player{
+		{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"},
+		{ID: "d", Name: "D"}, {ID: "e", Name: "E"}, {ID: "f", Name: "F"},
+	}
+	sess := &session.Session{
+		ID: "s", MatchFormat: session.MatchFormatDoubles,
+		Players: players,
+		Courts:  []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	if err := validatePlannedRest(sess, []string{"a", "b"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if err := validatePlannedRest(sess, []string{"zz"}); err == nil {
+		t.Fatal("expected unknown id error")
+	}
+	if err := validatePlannedRest(sess, []string{"a", "a"}); err == nil {
+		t.Fatal("expected duplicate id error")
+	}
+	// 6 active players, 4 needed on court → resting 3 leaves 3 < 4
+	if err := validatePlannedRest(sess, []string{"a", "b", "c"}); err == nil {
+		t.Fatal("expected too-many-resting error")
+	}
+}
+
 func TestLegacySessionMigratesToRound(t *testing.T) {
 	sess := &session.Session{
 		ID:          "legacy",
