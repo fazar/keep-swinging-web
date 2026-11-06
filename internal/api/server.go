@@ -36,6 +36,7 @@ func Mount(mux *http.ServeMux, s *Server) {
 	mux.HandleFunc("PATCH /api/sessions/{id}/matches/{match_index}", s.handlePatchMatchScores)
 	mux.HandleFunc("POST /api/sessions/{id}/reshuffle", s.handleReshuffle)
 	mux.HandleFunc("POST /api/sessions/{id}/rounds", s.handleCreateRound)
+	mux.HandleFunc("GET /api/sessions/{id}/next-round-preview", s.handleNextRoundPreview)
 	mux.HandleFunc("PUT /api/sessions/{id}/rest-next", s.handlePutRestNext)
 	mux.HandleFunc("PATCH /api/sessions/{id}/rounds/{round_id}/courts/{court_id}", s.handlePatchRoundCourt)
 	mux.HandleFunc("DELETE /api/sessions/{id}/rounds/{round_id}/courts/{court_id}", s.handleDeleteRoundCourt)
@@ -717,6 +718,93 @@ func migrateLegacyRound(sess *session.Session) bool {
 	return true
 }
 
+type nextRoundPreview struct {
+	Round            *session.Round `json:"round"`
+	RestingPlayerIDs []string       `json:"resting_player_ids"`
+	Hypothetical     bool           `json:"hypothetical"`
+}
+
+// previewState derives the roster and match history the round AFTER the open
+// one would be scheduled from: pending courts of the open round count as
+// played (scores unknown → they contribute no points; GamesPlayed and
+// encounters are score-independent).
+func previewState(sess *session.Session) ([]session.Player, []session.RecordedMatch, bool) {
+	players := append([]session.Player(nil), sess.Players...)
+	matches := recordedMatches(sess)
+	hypothetical := false
+	if sess.CurrentRound != nil && sess.CurrentRound.Status == session.RoundStatusOpen {
+		hypothetical = true
+		for _, slot := range sess.CurrentRound.Slots {
+			if slot.Status != session.RoundSlotStatusPending {
+				continue
+			}
+			matches = append(matches, session.RecordedMatch{
+				TeamAIDs: playerIDs(slot.TeamA),
+				TeamBIDs: playerIDs(slot.TeamB),
+				PlayedAt: time.Now().UTC(),
+			})
+			played := append(append([]session.Player(nil), slot.TeamA...), slot.TeamB...)
+			for _, p := range played {
+				for i := range players {
+					if players[i].ID == p.ID {
+						players[i].GamesPlayed++
+					}
+				}
+			}
+		}
+	}
+	return players, matches, hypothetical
+}
+
+func playerIDs(players []session.Player) []string {
+	out := make([]string, len(players))
+	for i, p := range players {
+		out[i] = p.ID
+	}
+	return out
+}
+
+// buildPreview computes the next round read-only: nothing is persisted and
+// SuggestionKey is untouched.
+func buildPreview(sess *session.Session) (*nextRoundPreview, error) {
+	players, matches, hypothetical := previewState(sess)
+	round, _, err := scheduler.PickRoundWithRest(players, matches, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
+	if err != nil {
+		return nil, err
+	}
+	assigned := map[string]bool{}
+	for _, slot := range round.Slots {
+		for _, p := range append(append([]session.Player(nil), slot.TeamA...), slot.TeamB...) {
+			assigned[p.ID] = true
+		}
+	}
+	var resting []string
+	for _, p := range players {
+		if !p.Inactive && !assigned[p.ID] {
+			resting = append(resting, p.ID)
+		}
+	}
+	return &nextRoundPreview{Round: round, RestingPlayerIDs: resting, Hypothetical: hypothetical}, nil
+}
+
+func (s *Server) handleNextRoundPreview(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	sess, err := s.loadSession(ctx, r.PathValue("id"), w)
+	if sess == nil || err != nil {
+		return
+	}
+	if !session.UsesRoundModel(sess) {
+		writeError(w, http.StatusBadRequest, "legacy sessions use the match endpoint")
+		return
+	}
+	preview, err := buildPreview(sess)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, preview)
+}
+
 func generateNextRound(sess *session.Session) error {
 	if sess == nil || !session.UsesRoundModel(sess) {
 		return errors.New("session is not round-based")
@@ -769,18 +857,11 @@ func roundRecordedMatches(round session.Round) []session.RecordedMatch {
 		if slot.Status != session.RoundSlotStatusCompleted || slot.ScoreA == nil || slot.ScoreB == nil {
 			continue
 		}
-		ids := func(players []session.Player) []string {
-			out := make([]string, len(players))
-			for i, p := range players {
-				out[i] = p.ID
-			}
-			return out
-		}
 		playedAt := time.Now().UTC()
 		if slot.PlayedAt != nil {
 			playedAt = *slot.PlayedAt
 		}
-		matches = append(matches, session.RecordedMatch{TeamAIDs: ids(slot.TeamA), TeamBIDs: ids(slot.TeamB), ScoreA: *slot.ScoreA, ScoreB: *slot.ScoreB, PlayedAt: playedAt})
+		matches = append(matches, session.RecordedMatch{TeamAIDs: playerIDs(slot.TeamA), TeamBIDs: playerIDs(slot.TeamB), ScoreA: *slot.ScoreA, ScoreB: *slot.ScoreB, PlayedAt: playedAt})
 	}
 	return matches
 }

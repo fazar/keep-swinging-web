@@ -77,6 +77,80 @@ func TestGenerateNextRoundConsumesPlannedRest(t *testing.T) {
 	}
 }
 
+func TestPreviewStateHypothetical(t *testing.T) {
+	// No open round → clean state, not hypothetical.
+	sess := &session.Session{
+		ID:          "s",
+		MatchFormat: session.MatchFormatDoubles,
+		Players:     []session.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}},
+		Courts:      []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	_, matches, hyp := previewState(sess)
+	if hyp || len(matches) != 0 {
+		t.Fatalf("expected clean state, hyp=%v matches=%d", hyp, len(matches))
+	}
+	// Open round with a pending slot → hypothetical, GP bumped, virtual match.
+	sess.CurrentRound = &session.Round{
+		ID: "r", Status: session.RoundStatusOpen,
+		Slots: []session.RoundSlot{{
+			CourtID: "court-1", CourtName: "Court 1", Status: session.RoundSlotStatusPending,
+			TeamA: []session.Player{{ID: "a"}, {ID: "b"}}, TeamB: []session.Player{{ID: "c"}, {ID: "d"}},
+		}},
+	}
+	players, matches, hyp := previewState(sess)
+	if !hyp || len(matches) != 1 {
+		t.Fatalf("expected hypothetical state with one virtual match: hyp=%v matches=%d", hyp, len(matches))
+	}
+	for _, p := range players {
+		if p.GamesPlayed != 1 {
+			t.Fatalf("pending participants should have GP bumped: %#v", p)
+		}
+	}
+}
+
+func TestBuildPreviewGivesRestedPlayerAGame(t *testing.T) {
+	// Mexicano keeps selection deterministic (lowest GP, ties by ID).
+	sess := &session.Session{
+		ID:             "s",
+		Sport:          session.SportTennis,
+		MatchFormat:    session.MatchFormatDoubles,
+		ShufflingStyle: session.ShufflingStyleMexicano,
+		Players: []session.Player{
+			{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"},
+			{ID: "d", Name: "D"}, {ID: "e", Name: "E"},
+		},
+		Courts: []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	prev, err := buildPreview(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prev.Hypothetical {
+		t.Fatal("no open round yet → preview must not be hypothetical")
+	}
+	// Open the generated round and preview the one after it.
+	sess.CurrentRound = prev.Round
+	prev2, err := buildPreview(sess)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prev2.Hypothetical {
+		t.Fatal("open round → preview must be hypothetical")
+	}
+	slot := prev2.Round.Slots[0]
+	played := map[string]bool{}
+	for _, p := range append(slot.TeamA, slot.TeamB...) {
+		played[p.ID] = true
+	}
+	// Pending round-1 slot counts as played: GP a..d = 1, e = 0 → e plays now.
+	if !played["e"] {
+		t.Fatalf("preview should give the rested player a game: %#v", prev2.Round)
+	}
+	if len(prev2.RestingPlayerIDs) != 1 || played[prev2.RestingPlayerIDs[0]] {
+		t.Fatalf("expected exactly one rested player among a..d: %#v", prev2.RestingPlayerIDs)
+	}
+}
+
 func TestLegacySessionMigratesToRound(t *testing.T) {
 	sess := &session.Session{
 		ID:          "legacy",
