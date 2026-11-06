@@ -581,13 +581,14 @@ func (s *Server) handleCreateRound(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "current round is still open")
 		return
 	}
-	round, key, pickErr := scheduler.PickRound(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
+	round, key, pickErr := scheduler.PickRoundWithRest(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
 	if pickErr != nil {
 		writeError(w, http.StatusBadRequest, pickErr.Error())
 		return
 	}
 	sess.CurrentRound = round
 	sess.SuggestionKey = key
+	sess.RestNextPlayerIDs = nil
 	if err := s.Store.Save(ctx, sess); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save session")
 		return
@@ -720,12 +721,13 @@ func generateNextRound(sess *session.Session) error {
 	if sess == nil || !session.UsesRoundModel(sess) {
 		return errors.New("session is not round-based")
 	}
-	round, key, err := scheduler.PickRound(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
+	round, key, err := scheduler.PickRoundWithRest(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
 	if err != nil {
 		return err
 	}
 	sess.CurrentRound = round
 	sess.SuggestionKey = key
+	sess.RestNextPlayerIDs = nil
 	return nil
 }
 

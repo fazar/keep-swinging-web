@@ -47,6 +47,36 @@ func TestValidatePlannedRest(t *testing.T) {
 	}
 }
 
+func TestGenerateNextRoundConsumesPlannedRest(t *testing.T) {
+	sess := &session.Session{
+		ID:          "s",
+		Sport:       session.SportTennis,
+		MatchFormat: session.MatchFormatDoubles,
+		Players: []session.Player{
+			{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"},
+			{ID: "d", Name: "D"}, {ID: "e", Name: "E"}, {ID: "f", Name: "F"},
+		},
+		Courts:            []session.Court{{ID: "court-1", Name: "Court 1"}},
+		RestNextPlayerIDs: []string{"a", "b"},
+	}
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+	if len(sess.CurrentRound.RestingPlayerIDs) != 2 {
+		t.Fatalf("expected planned rest recorded on round: %#v", sess.CurrentRound.RestingPlayerIDs)
+	}
+	for _, slot := range sess.CurrentRound.Slots {
+		for _, p := range append(slot.TeamA, slot.TeamB...) {
+			if p.ID == "a" || p.ID == "b" {
+				t.Fatalf("planned-resting player assigned: %s", p.ID)
+			}
+		}
+	}
+	if len(sess.RestNextPlayerIDs) != 0 {
+		t.Fatalf("planned rest should be consumed after generation: %#v", sess.RestNextPlayerIDs)
+	}
+}
+
 func TestLegacySessionMigratesToRound(t *testing.T) {
 	sess := &session.Session{
 		ID:          "legacy",
