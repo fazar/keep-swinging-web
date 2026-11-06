@@ -523,7 +523,7 @@ async function loadNextRoundPreview(sess) {
   if (!isRoundSession(sess)) return;
   const el = $("#next-round-preview");
   try {
-    const preview = await api(`/sessions/${sess.id}/next-round-preview`);
+    const preview = await api(`/api/sessions/${sess.id}/next-round-preview`);
     renderNextRoundPreview(sess, preview);
   } catch (err) {
     if (el) el.textContent = "No preview available.";
@@ -589,7 +589,7 @@ function fillRestNextPlayers(sess) {
       try {
         // The PUT response is only {rest_next_player_ids}, not a full session —
         // keep using the local sess for id and preview.
-        await api(`/sessions/${sess.id}/rest-next`, {
+        await api(`/api/sessions/${sess.id}/rest-next`, {
           method: "PUT",
           body: JSON.stringify({ player_ids: ids }),
         });
