@@ -464,6 +464,8 @@ function refreshSessionView(sess) {
   else renderSuggestion(sess);
   renderHistory([...sess.matches, ...roundMatches(sess)], sess.players, sess);
   fillRestingPlayers(sess);
+  fillRestNextPlayers(sess);
+  void loadNextRoundPreview(sess);
   renderSessionSetup(sess);
   fillMinPlayers(sess);
   setLineupControlsBusy(false);
@@ -511,6 +513,93 @@ function renderRoundBoard(sess) {
   if (complete) {
     complete.classList.toggle("hidden", !round || pending || !hasCompleted);
     complete.disabled = pending || !hasCompleted;
+  }
+}
+
+async function loadNextRoundPreview(sess) {
+  const section = $("#next-up");
+  if (!section) return;
+  section.classList.toggle("hidden", !isRoundSession(sess));
+  if (!isRoundSession(sess)) return;
+  const el = $("#next-round-preview");
+  try {
+    const preview = await api(`/sessions/${sess.id}/next-round-preview`);
+    renderNextRoundPreview(sess, preview);
+  } catch (err) {
+    if (el) el.textContent = "No preview available.";
+  }
+}
+
+function renderNextRoundPreview(sess, preview) {
+  const el = $("#next-round-preview");
+  if (!el) return;
+  const round = preview?.round;
+  if (!round) {
+    el.textContent = "No preview available.";
+    return;
+  }
+  const team = (players) => (players || []).map((p) => escapeHtml(p.name)).join(" · ");
+  const cards = (round.slots || [])
+    .map((slot) => {
+      const unused = slot.status === "unused";
+      return `<article class="court-card court-card--${escapeHtml(slot.status)} court-card--preview">
+        <div class="court-card-head"><strong>${escapeHtml(slot.court_name)}</strong><span class="court-status">${unused ? "Unused" : "Planned"}</span></div>
+        ${unused ? '<p class="hint">Not enough active players.</p>' : `<div class="court-teams"><div><span class="team-title">Team Left</span>${team(slot.team_a)}</div><div><span class="team-title">Team Right</span>${team(slot.team_b)}</div></div>`}
+      </article>`;
+    })
+    .join("");
+  const restingNames = (preview.resting_player_ids || [])
+    .map((id) => (sess.players || []).find((p) => p.id === id)?.name)
+    .filter(Boolean);
+  const restingHtml = restingNames.length
+    ? `<p class="hint">Resting: ${restingNames.map(escapeHtml).join(" · ")}</p>`
+    : "";
+  const hint = preview.hypothetical
+    ? '<p class="hint">Tentative — updates as scores come in.</p>'
+    : "";
+  el.innerHTML = `<div class="round-board">${cards}${restingHtml}${hint}</div>`;
+}
+
+function fillRestNextPlayers(sess) {
+  const wrap = document.getElementById("rest-next-players");
+  if (!wrap) return;
+  const planned = new Set(sess?.rest_next_player_ids || []);
+  wrap.innerHTML = "";
+  const sorted = [...shuffleActivePlayers(sess?.players || [])].sort((a, b) =>
+    a.name.localeCompare(b.name),
+  );
+  if (!sorted.length) {
+    wrap.innerHTML = '<span class="hint">No active players.</span>';
+    return;
+  }
+  for (const p of sorted) {
+    const label = document.createElement("label");
+    label.className = "resting-player-option";
+    const checked = planned.has(p.id) ? " checked" : "";
+    label.innerHTML = `<input type="checkbox" class="rest-next-checkbox" data-player-id="${escapeHtml(p.id)}"${checked}><span>${escapeHtml(p.name)}</span>`;
+    wrap.appendChild(label);
+  }
+  for (const box of wrap.querySelectorAll(".rest-next-checkbox")) {
+    box.addEventListener("change", async () => {
+      const ids = [
+        ...wrap.querySelectorAll(".rest-next-checkbox"),
+      ]
+        .filter((b) => b.checked)
+        .map((b) => b.dataset.playerId);
+      try {
+        // The PUT response is only {rest_next_player_ids}, not a full session —
+        // keep using the local sess for id and preview.
+        await api(`/sessions/${sess.id}/rest-next`, {
+          method: "PUT",
+          body: JSON.stringify({ player_ids: ids }),
+        });
+        sess.rest_next_player_ids = ids;
+        void loadNextRoundPreview(sess);
+      } catch (err) {
+        box.checked = !box.checked;
+        alert(err?.message || "Could not update resting players");
+      }
+    });
   }
 }
 

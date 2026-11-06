@@ -1078,3 +1078,11 @@ button.session-remove-player {
   padding: 0.45rem 0.65rem;
   font-size: 0.85rem;
 }
+
+.next-up {
+  margin-top: 1rem;
+}
+
+.court-card--preview {
+  opacity: 0.85;
+}
