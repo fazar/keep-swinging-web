@@ -26,30 +26,6 @@ func singlesFairnessScore(games map[string]int, lu SinglesLineup) int {
 	return games[lu.PlayerA] + games[lu.PlayerB]
 }
 
-// singlesMexicanoTopVsTopScore scores lineups for mexicano top-vs-top style in singles:
-// 1. Prefer the most-experienced players
-// 2. Among those, prefer the matchup with the highest GP difference (strongest vs weakest)
-func singlesMexicanoTopVsTopScore(games map[string]int, lu SinglesLineup) int {
-	sum := games[lu.PlayerA] + games[lu.PlayerB]
-	diff := games[lu.PlayerA] - games[lu.PlayerB]
-	if diff < 0 {
-		diff = -diff
-	}
-	return -sum*1000 + diff
-}
-
-// singlesMexicanoTopVsBottomScore scores lineups for mexicano top-vs-bottom style in singles:
-// 1. Prefer the least-experienced players (fairness)
-// 2. Among those, prefer the matchup with the highest GP difference (strongest vs weakest)
-func singlesMexicanoTopVsBottomScore(games map[string]int, lu SinglesLineup) int {
-	sum := games[lu.PlayerA] + games[lu.PlayerB]
-	diff := games[lu.PlayerA] - games[lu.PlayerB]
-	if diff < 0 {
-		diff = -diff
-	}
-	return sum*1000 - diff
-}
-
 // PickSuggestionSingles chooses a singles matchup (1 vs 1):
 // - americano: minimize sum(games_played) — fairness focus.
 // - mexicano: prefer the two most-experienced players facing each other with max GP difference.
@@ -74,6 +50,18 @@ func PickSuggestionSingles(players []session.Player, matches []session.RecordedM
 	games := gamesMap(players)
 	byID := playerByID(players)
 
+	if isMexicanoStyle(style) {
+		ranked := rankPlayersByPoints(ids, playerPoints(matches))
+		key := SinglesLineupKey(ranked[0], ranked[1])
+		if key != excludeKey {
+			return &session.SuggestedMatch{
+				TeamA: []session.Player{byID[ranked[0]]},
+				TeamB: []session.Player{byID[ranked[1]]},
+			}, key, nil
+		}
+		// Reshuffle: fall through to encounter-aware search below.
+	}
+
 	var candidates []SinglesLineup
 	for i := 0; i < len(eligible); i++ {
 		for j := i + 1; j < len(eligible); j++ {
@@ -90,45 +78,20 @@ func PickSuggestionSingles(players []session.Player, matches []session.RecordedM
 		return nil, "", ErrNoSinglesLineup
 	}
 
-	var bestScore int
-	if style == session.ShufflingStyleMexicanoTopVsTop {
-		bestScore = singlesMexicanoTopVsTopScore(games, candidates[0])
-	} else if style == session.ShufflingStyleMexicanoTopVsBottom {
-		bestScore = singlesMexicanoTopVsBottomScore(games, candidates[0])
-	} else if style == session.ShufflingStyleMexicano {
-		bestScore = singlesFairnessScore(games, candidates[0])
-	} else {
-		bestScore = singlesFairnessScore(games, candidates[0])
+	enc := buildEncounterIndex(matches)
+	score := func(lu SinglesLineup) int {
+		return singlesFairnessScore(games, lu) + 10*enc.opponentCount(lu.PlayerA, lu.PlayerB)
 	}
+	bestScore := score(candidates[0])
 	for _, lu := range candidates[1:] {
-		var s int
-		if style == session.ShufflingStyleMexicanoTopVsTop {
-			s = singlesMexicanoTopVsTopScore(games, lu)
-		} else if style == session.ShufflingStyleMexicanoTopVsBottom {
-			s = singlesMexicanoTopVsBottomScore(games, lu)
-		} else if style == session.ShufflingStyleMexicano {
-			s = singlesFairnessScore(games, lu)
-		} else {
-			s = singlesFairnessScore(games, lu)
-		}
-		if s < bestScore {
+		if s := score(lu); s < bestScore {
 			bestScore = s
 		}
 	}
 
 	var best []SinglesLineup
 	for _, lu := range candidates {
-		var s int
-		if style == session.ShufflingStyleMexicanoTopVsTop {
-			s = singlesMexicanoTopVsTopScore(games, lu)
-		} else if style == session.ShufflingStyleMexicanoTopVsBottom {
-			s = singlesMexicanoTopVsBottomScore(games, lu)
-		} else if style == session.ShufflingStyleMexicano {
-			s = singlesFairnessScore(games, lu)
-		} else {
-			s = singlesFairnessScore(games, lu)
-		}
-		if s == bestScore {
+		if score(lu) == bestScore {
 			best = append(best, lu)
 		}
 	}

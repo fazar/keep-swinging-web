@@ -47,71 +47,8 @@ func fairnessScore(games map[string]int, lu Lineup) int {
 	return sum
 }
 
-// mexicanoScore scores lineups for mexicano style:
-// 1. Prefer the 4 least-experienced players (fairness - rotate players in)
-// 2. Among those, prefer splits where the GP difference between teams is maximized (strongest vs weakest)
-func mexicanoScore(games map[string]int, lu Lineup) int {
-	sum := 0
-	for _, id := range lu.TeamA[:] {
-		sum += games[id]
-	}
-	for _, id := range lu.TeamB[:] {
-		sum += games[id]
-	}
-
-	teamA := games[lu.TeamA[0]] + games[lu.TeamA[1]]
-	teamB := games[lu.TeamB[0]] + games[lu.TeamB[1]]
-	diff := teamA - teamB
-	if diff < 0 {
-		diff = -diff
-	}
-
-	return sum*1000 - diff
-}
-
-// mexicanoTopVsTopScore scores lineups for mexicano top-vs-top style:
-// 1. Prefer the 4 most-experienced players (highest games played)
-// 2. Among those, prefer splits where the GP difference between teams is maximized (strongest vs weakest)
-func mexicanoTopVsTopScore(games map[string]int, lu Lineup) int {
-	sum := 0
-	for _, id := range lu.TeamA[:] {
-		sum += games[id]
-	}
-	for _, id := range lu.TeamB[:] {
-		sum += games[id]
-	}
-	
-	teamA := games[lu.TeamA[0]] + games[lu.TeamA[1]]
-	teamB := games[lu.TeamB[0]] + games[lu.TeamB[1]]
-	diff := teamA - teamB
-	if diff < 0 {
-		diff = -diff
-	}
-	
-	return -sum*1000 + diff
-}
-
-// mexicanoTopVsBottomScore scores lineups for mexicano top-vs-bottom style:
-// 1. Prefer the 4 least-experienced players (fairness - rotate players in)
-// 2. Among those, pair strongest+weakest vs middle two (maximize GP difference)
-func mexicanoTopVsBottomScore(games map[string]int, lu Lineup) int {
-	sum := 0
-	for _, id := range lu.TeamA[:] {
-		sum += games[id]
-	}
-	for _, id := range lu.TeamB[:] {
-		sum += games[id]
-	}
-	
-	teamA := games[lu.TeamA[0]] + games[lu.TeamA[1]]
-	teamB := games[lu.TeamB[0]] + games[lu.TeamB[1]]
-	diff := teamA - teamB
-	if diff < 0 {
-		diff = -diff
-	}
-	
-	return sum*1000 - diff
-}
+// mexicanoPairing (rounds.go) and the points leaderboard drive mexicano
+// suggestions; americano scoring adds encounter penalties on top of fairness.
 
 func eachQuartet(ids []string, yield func([4]string)) {
 	n := len(ids)
@@ -274,6 +211,17 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, s
 
 	games := gamesMap(players)
 	byID := playerByID(players)
+	enc := buildEncounterIndex(matches)
+
+	if isMexicanoStyle(style) {
+		ranked := rankPlayersByPoints(ids, playerPoints(matches))
+		lu := mexicanoPairing(style, [4]string{ranked[0], ranked[1], ranked[2], ranked[3]})
+		key := LineupKey(lu.TeamA, lu.TeamB)
+		if key != excludeKey {
+			return suggestionFromLineup(byID, lu), key, nil
+		}
+		// Reshuffle: fall through to encounter-aware search below.
+	}
 
 	var candidates []Lineup
 	eachQuartet(ids, func(q [4]string) {
@@ -294,63 +242,38 @@ func PickSuggestion(players []session.Player, matches []session.RecordedMatch, s
 		candidates = rotated
 	}
 
-	var bestScore int
-	if style == session.ShufflingStyleMexicanoTopVsTop {
-		bestScore = mexicanoTopVsTopScore(games, candidates[0])
-	} else if style == session.ShufflingStyleMexicanoTopVsBottom {
-		bestScore = mexicanoTopVsBottomScore(games, candidates[0])
-	} else if style == session.ShufflingStyleMexicano {
-		bestScore = mexicanoScore(games, candidates[0])
-	} else {
-		bestScore = fairnessScore(games, candidates[0])
+	score := func(lu Lineup) int {
+		return fairnessScore(games, lu) + lineupEncounterPenalty(enc, roundLineup{teamA: lu.TeamA, teamB: lu.TeamB})
 	}
+	bestScore := score(candidates[0])
 	for _, lu := range candidates[1:] {
-		var s int
-		if style == session.ShufflingStyleMexicanoTopVsTop {
-			s = mexicanoTopVsTopScore(games, lu)
-		} else if style == session.ShufflingStyleMexicanoTopVsBottom {
-			s = mexicanoTopVsBottomScore(games, lu)
-		} else if style == session.ShufflingStyleMexicano {
-			s = mexicanoScore(games, lu)
-		} else {
-			s = fairnessScore(games, lu)
-		}
-		if s < bestScore {
+		if s := score(lu); s < bestScore {
 			bestScore = s
 		}
 	}
 
 	var best []Lineup
 	for _, lu := range candidates {
-		var s int
-		if style == session.ShufflingStyleMexicanoTopVsTop {
-			s = mexicanoTopVsTopScore(games, lu)
-		} else if style == session.ShufflingStyleMexicanoTopVsBottom {
-			s = mexicanoTopVsBottomScore(games, lu)
-		} else if style == session.ShufflingStyleMexicano {
-			s = mexicanoScore(games, lu)
-		} else {
-			s = fairnessScore(games, lu)
-		}
-		if s == bestScore {
+		if score(lu) == bestScore {
 			best = append(best, lu)
 		}
 	}
 
 	chosen := best[pickIndex(len(best))]
 	key := LineupKey(chosen.TeamA, chosen.TeamB)
+	return suggestionFromLineup(byID, chosen), key, nil
+}
 
+func suggestionFromLineup(byID map[string]session.Player, lu Lineup) *session.SuggestedMatch {
 	buildTeam := func(pair [2]string) []session.Player {
 		p0 := byID[pair[0]]
 		p1 := byID[pair[1]]
 		return []session.Player{p0, p1}
 	}
-
-	sug := &session.SuggestedMatch{
-		TeamA: buildTeam(chosen.TeamA),
-		TeamB: buildTeam(chosen.TeamB),
+	return &session.SuggestedMatch{
+		TeamA: buildTeam(lu.TeamA),
+		TeamB: buildTeam(lu.TeamB),
 	}
-	return sug, key, nil
 }
 
 func pickIndex(n int) int {

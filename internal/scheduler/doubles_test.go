@@ -152,46 +152,70 @@ func TestPartnerRotation_allowsRepeatAfterFullCycle(t *testing.T) {
 	}
 }
 
-func TestPickSuggestion_mexicanoPrefersUnderplayed(t *testing.T) {
+func TestPickSuggestion_mexicanoPairsByPoints(t *testing.T) {
 	players := []session.Player{
-		{ID: "p1", Name: "A", GamesPlayed: 0},
-		{ID: "p2", Name: "B", GamesPlayed: 0},
-		{ID: "p3", Name: "C", GamesPlayed: 10},
-		{ID: "p4", Name: "D", GamesPlayed: 10},
-		{ID: "p5", Name: "E", GamesPlayed: 20},
-		{ID: "p6", Name: "F", GamesPlayed: 20},
+		{ID: "p1", Name: "A"}, {ID: "p2", Name: "B"}, {ID: "p3", Name: "C"},
+		{ID: "p4", Name: "D"}, {ID: "p5", Name: "E"}, {ID: "p6", Name: "F"},
 	}
-	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleMexicano, "", nil)
+	matches := []session.RecordedMatch{
+		{TeamAIDs: []string{"p1", "p2"}, TeamBIDs: []string{"p3", "p4"}, ScoreA: 24, ScoreB: 8},
+	}
+	sug, _, err := PickSuggestion(players, matches, session.ShufflingStyleMexicano, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ids := map[string]bool{}
-	for _, p := range append(sug.TeamA, sug.TeamB...) {
-		ids[p.ID] = true
+	// points: p1=p2=24, p3=p4=8, p5=p6=0 → ranks p1,p2,p3,p4,p5,p6
+	// canonical: (p1,p3) vs (p2,p4)
+	left := map[string]bool{sug.TeamA[0].ID: true, sug.TeamA[1].ID: true}
+	right := map[string]bool{sug.TeamB[0].ID: true, sug.TeamB[1].ID: true}
+	l1 := map[string]bool{"p1": true, "p3": true}
+	l2 := map[string]bool{"p2": true, "p4": true}
+	same := func(a, b map[string]bool) bool {
+		for k := range a {
+			if !b[k] {
+				return false
+			}
+		}
+		return len(a) == len(b)
 	}
-	if !ids["p1"] || !ids["p2"] {
-		t.Fatalf("mexicano should prefer underplayed players for fairness, got %#v", sug)
+	if !(same(left, l1) && same(right, l2)) && !(same(left, l2) && same(right, l1)) {
+		t.Fatalf("mexicano suggestion should pair 1st+3rd vs 2nd+4th by points: %#v", sug)
 	}
 }
 
-func TestPickSuggestion_mexicanoBalancesTeams(t *testing.T) {
+func TestPickSuggestion_mexicanoReshuffleFallsBack(t *testing.T) {
 	players := []session.Player{
-		{ID: "p1", Name: "A", GamesPlayed: 10},
-		{ID: "p2", Name: "B", GamesPlayed: 11},
-		{ID: "p3", Name: "C", GamesPlayed: 12},
-		{ID: "p4", Name: "D", GamesPlayed: 13},
-		{ID: "p5", Name: "E", GamesPlayed: 20},
-		{ID: "p6", Name: "F", GamesPlayed: 21},
+		{ID: "p1", Name: "A"}, {ID: "p2", Name: "B"}, {ID: "p3", Name: "C"}, {ID: "p4", Name: "D"},
 	}
-	sug, _, err := PickSuggestion(players, nil, session.ShufflingStyleMexicano, "", nil)
+	_, key, err := PickSuggestion(players, nil, session.ShufflingStyleMexicano, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	teamA := sug.TeamA[0].GamesPlayed + sug.TeamA[1].GamesPlayed
-	teamB := sug.TeamB[0].GamesPlayed + sug.TeamB[1].GamesPlayed
-	// mexicano picks the 4 least-experienced players and pairs strongest vs weakest (max diff)
-	gotValid := (teamA == 21 && teamB == 25) || (teamA == 25 && teamB == 21)
-	if !gotValid {
-		t.Fatalf("mexicano should pair least-experienced with strongest vs weakest, got teamA=%d teamB=%d sug=%+v", teamA, teamB, sug)
+	_, nextKey, err := PickSuggestion(players, nil, session.ShufflingStyleMexicano, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key == nextKey {
+		t.Fatalf("mexicano reshuffle must return a different lineup: %q", nextKey)
+	}
+}
+
+func TestPickSuggestion_americanoAvoidsImmediateRematchPartners(t *testing.T) {
+	players := []session.Player{
+		{ID: "p1", Name: "A"}, {ID: "p2", Name: "B"}, {ID: "p3", Name: "C"}, {ID: "p4", Name: "D"},
+		{ID: "p5", Name: "E"}, {ID: "p6", Name: "F"},
+	}
+	matches := []session.RecordedMatch{
+		{TeamAIDs: []string{"p1", "p2"}, TeamBIDs: []string{"p3", "p4"}, ScoreA: 10, ScoreB: 10},
+	}
+	sug, _, err := PickSuggestion(players, matches, session.ShufflingStyleAmericano, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// With six players there are fresh quartets (e.g. involving p5/p6); the
+	// suggestion must not reuse the exact previous matchup.
+	old := LineupKey([2]string{"p1", "p2"}, [2]string{"p3", "p4"})
+	if LineupKey([2]string{sug.TeamA[0].ID, sug.TeamA[1].ID}, [2]string{sug.TeamB[0].ID, sug.TeamB[1].ID}) == old {
+		t.Fatalf("americano should not repeat the previous matchup when fresh players exist: %#v", sug)
 	}
 }
