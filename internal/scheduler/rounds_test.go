@@ -287,6 +287,34 @@ func idsOfSlot(team []session.Player) map[string]bool {
 	return out
 }
 
+func TestPickCourtPlayersMexicanoPairsTopRankedLeftovers(t *testing.T) {
+	players := roundPlayers(8, 0)
+	matches := []session.RecordedMatch{
+		{TeamAIDs: []string{"p5", "p6"}, TeamBIDs: []string{"p7", "p8"}, ScoreA: 25, ScoreB: 5},
+	}
+	teamA, teamB, err := PickCourtPlayers(players, matches, session.ShufflingStyleMexicano, session.MatchFormatDoubles, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	left := map[string]bool{teamA[0].ID: true, teamA[1].ID: true}
+	right := map[string]bool{teamB[0].ID: true, teamB[1].ID: true}
+	// points: p5=p6=25, p7=p8=5, p1..p4=0 → ranks p5,p6,p7,p8,p1,p2,p3,p4
+	// canonical 1&3 vs 2&4 → (p5,p7) vs (p6,p8)
+	expectedLeft := map[string]bool{"p5": true, "p7": true}
+	expectedRight := map[string]bool{"p6": true, "p8": true}
+	same := func(a, b map[string]bool) bool {
+		for k := range a {
+			if !b[k] {
+				return false
+			}
+		}
+		return len(a) == len(b)
+	}
+	if !(same(left, expectedLeft) && same(right, expectedRight)) && !(same(left, expectedRight) && same(right, expectedLeft)) {
+		t.Fatalf("mexicano court fill should pair 1st+3rd vs 2nd+4th of leftovers: %#v %#v", teamA, teamB)
+	}
+}
+
 func roundPlayers(n, games int) []session.Player {
 	players := make([]session.Player, n)
 	for i := range players {

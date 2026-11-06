@@ -214,6 +214,15 @@ func PickCourtPlayers(players []session.Player, matches []session.RecordedMatch,
 	rotation := buildPartnerIndex(matches)
 	enc := buildEncounterIndex(matches)
 
+	if isMexicanoStyle(style) {
+		ranked := rankPlayersByPoints(ids, playerPoints(matches))
+		if format == session.MatchFormatSingles {
+			return playersForIDs(byID, []string{ranked[0]}), playersForIDs(byID, []string{ranked[1]}), nil
+		}
+		lu := mexicanoPairing(style, [4]string{ranked[0], ranked[1], ranked[2], ranked[3]})
+		return playersForIDs(byID, lu.TeamA[:]), playersForIDs(byID, lu.TeamB[:]), nil
+	}
+
 	var cands []roundLineup
 	if format == session.MatchFormatSingles {
 		for i := 0; i < len(ids); i++ {
