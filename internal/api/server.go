@@ -767,7 +767,7 @@ func playerIDs(players []session.Player) []string {
 // state.
 func buildPreview(sess *session.Session) (*session.RoundPreview, error) {
 	players, matches, hypothetical := previewState(sess)
-	round, _, err := scheduler.PickRoundWithRest(players, matches, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
+	round, key, err := scheduler.PickRoundWithRest(players, matches, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -783,20 +783,23 @@ func buildPreview(sess *session.Session) (*session.RoundPreview, error) {
 			resting = append(resting, p.ID)
 		}
 	}
-	return &session.RoundPreview{Round: *round, RestingPlayerIDs: resting, Hypothetical: hypothetical}, nil
+	return &session.RoundPreview{Round: *round, RestingPlayerIDs: resting, Hypothetical: hypothetical, Key: key}, nil
 }
 
-// refreshNextRoundPreview recomputes and stores the frozen preview. Preview
-// errors are swallowed: the preview is advisory and must never break the
-// triggering mutation. Call this on round/roster/court/rest changes — never
-// on score saves, so the preview stays put while results come in.
+// refreshNextRoundPreview recomputes and stores the frozen preview. On error
+// the stored preview is dropped so generation falls back to a live pick. Call
+// this on round/roster/court/rest changes — never on score saves, so the
+// preview stays put while results come in.
 func refreshNextRoundPreview(sess *session.Session) {
 	if sess == nil || !session.UsesRoundModel(sess) {
 		return
 	}
-	if preview, err := buildPreview(sess); err == nil {
-		sess.NextRoundPreview = preview
+	preview, err := buildPreview(sess)
+	if err != nil {
+		sess.NextRoundPreview = nil
+		return
 	}
+	sess.NextRoundPreview = preview
 }
 
 func (s *Server) handleNextRoundPreview(w http.ResponseWriter, r *http.Request) {
@@ -829,15 +832,45 @@ func generateNextRound(sess *session.Session) error {
 	if sess == nil || !session.UsesRoundModel(sess) {
 		return errors.New("session is not round-based")
 	}
-	round, key, err := scheduler.PickRoundWithRest(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
-	if err != nil {
-		return err
+	if sess.NextRoundPreview != nil {
+		// Promote the preview the users already saw: it was computed when the
+		// current round was created (pending games counted as played). This
+		// makes the generated round identical to the preview; mexicano
+		// leaderboards therefore lag one round by design.
+		round := sess.NextRoundPreview.Round
+		refreshSlotPlayers(sess, &round)
+		sess.CurrentRound = &round
+		sess.SuggestionKey = sess.NextRoundPreview.Key
+	} else {
+		round, key, err := scheduler.PickRoundWithRest(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
+		if err != nil {
+			return err
+		}
+		sess.CurrentRound = round
+		sess.SuggestionKey = key
 	}
-	sess.CurrentRound = round
-	sess.SuggestionKey = key
 	sess.RestNextPlayerIDs = nil
+	sess.NextRoundPreview = nil
 	refreshNextRoundPreview(sess)
 	return nil
+}
+
+// refreshSlotPlayers syncs the player snapshots embedded in a round's slots
+// with the session roster (names, GP, ...).
+func refreshSlotPlayers(sess *session.Session, round *session.Round) {
+	byID := make(map[string]session.Player, len(sess.Players))
+	for _, p := range sess.Players {
+		byID[p.ID] = p
+	}
+	for i := range round.Slots {
+		for _, team := range [][]session.Player{round.Slots[i].TeamA, round.Slots[i].TeamB} {
+			for j := range team {
+				if p, ok := byID[team[j].ID]; ok {
+					team[j] = p
+				}
+			}
+		}
+	}
 }
 
 func applyRoundCourtScore(sess *session.Session, roundID, courtID string, scoreA, scoreB int) error {

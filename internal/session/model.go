@@ -103,11 +103,16 @@ type Round struct {
 }
 
 // RoundPreview is a frozen preview of the round after the current one. It is
-// refreshed on round/roster/court/rest changes, not on score saves.
+// refreshed on round/roster/court/rest changes, not on score saves. When the
+// current round completes, the preview is promoted to the actual round, so
+// mexicano leaderboards intentionally lag one round.
 type RoundPreview struct {
 	Round            Round    `json:"round"`
 	RestingPlayerIDs []string `json:"resting_player_ids,omitempty"`
 	Hypothetical     bool     `json:"hypothetical"`
+	// Key is the scheduler's canonical round key, used as the reshuffle
+	// exclusion key when the preview is promoted.
+	Key string `json:"key,omitempty"`
 }
 
 // RecordedMatch is a finished doubles result.

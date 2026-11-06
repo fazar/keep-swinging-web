@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"keep-swinging-web/internal/scheduler"
 	"keep-swinging-web/internal/session"
 )
 
@@ -308,6 +309,65 @@ func TestCompletingRoundCountsEachGameOnce(t *testing.T) {
 		if p.GamesPlayed != 1 {
 			t.Fatalf("player %s played once but GP=%d (double count?)", p.ID, p.GamesPlayed)
 		}
+	}
+}
+
+func TestGenerateNextRoundPromotesPreviewDespiteScores(t *testing.T) {
+	sess := &session.Session{
+		ID:             "s",
+		Sport:          session.SportTennis,
+		MatchFormat:    session.MatchFormatDoubles,
+		ShufflingStyle: session.ShufflingStyleMexicano,
+		Players: []session.Player{
+			{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"}, {ID: "d", Name: "D"},
+			{ID: "e", Name: "E"}, {ID: "f", Name: "F"}, {ID: "g", Name: "G"}, {ID: "h", Name: "H"},
+		},
+		Courts: []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+	refreshNextRoundPreview(sess)
+	preview := *sess.NextRoundPreview
+
+	// Complete round 1 with a lopsided score: team (a,c) loses 5-21 to (b,d).
+	// A live mexicano pick would rank b first and pair (b,e) vs (a,f); the
+	// promoted preview must instead pair (a,e) vs (b,f).
+	scoreA, scoreB := 5, 21
+	for i := range sess.CurrentRound.Slots {
+		slot := &sess.CurrentRound.Slots[i]
+		slot.ScoreA, slot.ScoreB = &scoreA, &scoreB
+		slot.Status = session.RoundSlotStatusCompleted
+	}
+	sess.Rounds = append(sess.Rounds, *sess.CurrentRound)
+	sess.CurrentRound = nil
+	rebuildRoundStats(sess)
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+	slotPair := func(slot session.RoundSlot) string {
+		ids := []string{}
+		for _, p := range append(append([]session.Player{}, slot.TeamA...), slot.TeamB...) {
+			ids = append(ids, p.ID)
+		}
+		return strings.Join(ids, ",")
+	}
+	if len(sess.CurrentRound.Slots) != len(preview.Round.Slots) {
+		t.Fatalf("slot count mismatch")
+	}
+	for i := range preview.Round.Slots {
+		if slotPair(preview.Round.Slots[i]) != slotPair(sess.CurrentRound.Slots[i]) {
+			t.Fatalf("promotion must reproduce the preview: %s vs %s",
+				slotPair(preview.Round.Slots[i]), slotPair(sess.CurrentRound.Slots[i]))
+		}
+	}
+	// The promoted key must still work as the reshuffle exclusion key.
+	_, nextKey, err := scheduler.PickRoundWithRest(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, sess.SuggestionKey, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nextKey == sess.SuggestionKey {
+		t.Fatalf("promoted key must exclude the current round: %q", nextKey)
 	}
 }
 
