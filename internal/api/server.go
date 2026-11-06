@@ -157,6 +157,7 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.Suggested = sug
 	sess.SuggestionKey = key
+	refreshNextRoundPreview(sess)
 	ctx := r.Context()
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session", "err", err)
@@ -481,6 +482,7 @@ func (s *Server) handlePutRestNext(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.RestNextPlayerIDs = body.PlayerIDs
+	refreshNextRoundPreview(sess)
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not save session")
@@ -523,6 +525,7 @@ func (s *Server) handleReshuffle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sess.CurrentRound, sess.SuggestionKey = round, key
+		refreshNextRoundPreview(sess)
 		if err := s.Store.Save(ctx, sess); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not save session")
 			return
@@ -590,6 +593,7 @@ func (s *Server) handleCreateRound(w http.ResponseWriter, r *http.Request) {
 	sess.CurrentRound = round
 	sess.SuggestionKey = key
 	sess.RestNextPlayerIDs = nil
+	refreshNextRoundPreview(sess)
 	if err := s.Store.Save(ctx, sess); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save session")
 		return
@@ -645,6 +649,7 @@ func (s *Server) handleDeleteRoundCourt(w http.ResponseWriter, r *http.Request) 
 		slot.Status = session.RoundSlotStatusPending
 		slot.ScoreA, slot.ScoreB, slot.PlayedAt = nil, nil, nil
 		rebuildRoundStats(sess)
+		refreshNextRoundPreview(sess)
 		if err := s.Store.Save(ctx, sess); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not save session")
 			return
@@ -718,12 +723,6 @@ func migrateLegacyRound(sess *session.Session) bool {
 	return true
 }
 
-type nextRoundPreview struct {
-	Round            *session.Round `json:"round"`
-	RestingPlayerIDs []string       `json:"resting_player_ids"`
-	Hypothetical     bool           `json:"hypothetical"`
-}
-
 // previewState derives the roster and match history the round AFTER the open
 // one would be scheduled from: pending courts of the open round count as
 // played (scores unknown → they contribute no points; GamesPlayed and
@@ -764,9 +763,9 @@ func playerIDs(players []session.Player) []string {
 	return out
 }
 
-// buildPreview computes the next round read-only: nothing is persisted and
-// SuggestionKey is untouched.
-func buildPreview(sess *session.Session) (*nextRoundPreview, error) {
+// buildPreview computes the next round read-only against the given session
+// state.
+func buildPreview(sess *session.Session) (*session.RoundPreview, error) {
 	players, matches, hypothetical := previewState(sess)
 	round, _, err := scheduler.PickRoundWithRest(players, matches, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", sess.RestNextPlayerIDs)
 	if err != nil {
@@ -784,7 +783,20 @@ func buildPreview(sess *session.Session) (*nextRoundPreview, error) {
 			resting = append(resting, p.ID)
 		}
 	}
-	return &nextRoundPreview{Round: round, RestingPlayerIDs: resting, Hypothetical: hypothetical}, nil
+	return &session.RoundPreview{Round: *round, RestingPlayerIDs: resting, Hypothetical: hypothetical}, nil
+}
+
+// refreshNextRoundPreview recomputes and stores the frozen preview. Preview
+// errors are swallowed: the preview is advisory and must never break the
+// triggering mutation. Call this on round/roster/court/rest changes — never
+// on score saves, so the preview stays put while results come in.
+func refreshNextRoundPreview(sess *session.Session) {
+	if sess == nil || !session.UsesRoundModel(sess) {
+		return
+	}
+	if preview, err := buildPreview(sess); err == nil {
+		sess.NextRoundPreview = preview
+	}
 }
 
 func (s *Server) handleNextRoundPreview(w http.ResponseWriter, r *http.Request) {
@@ -797,12 +809,20 @@ func (s *Server) handleNextRoundPreview(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "legacy sessions use the match endpoint")
 		return
 	}
-	preview, err := buildPreview(sess)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
+	if sess.NextRoundPreview == nil {
+		preview, err := buildPreview(sess)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		sess.NextRoundPreview = preview
+		if err := s.Store.Save(ctx, sess); err != nil {
+			s.Logger.Error("save session", "err", err)
+			writeError(w, http.StatusInternalServerError, "could not save session")
+			return
+		}
 	}
-	writeJSON(w, http.StatusOK, preview)
+	writeJSON(w, http.StatusOK, sess.NextRoundPreview)
 }
 
 func generateNextRound(sess *session.Session) error {
@@ -816,6 +836,7 @@ func generateNextRound(sess *session.Session) error {
 	sess.CurrentRound = round
 	sess.SuggestionKey = key
 	sess.RestNextPlayerIDs = nil
+	refreshNextRoundPreview(sess)
 	return nil
 }
 
@@ -847,6 +868,9 @@ func recordedMatches(sess *session.Session) []session.RecordedMatch {
 	matches := append([]session.RecordedMatch(nil), sess.Matches...)
 	for _, round := range sess.Rounds {
 		matches = append(matches, roundRecordedMatches(round)...)
+	}
+	if sess.CurrentRound != nil {
+		matches = append(matches, roundRecordedMatches(*sess.CurrentRound)...)
 	}
 	return matches
 }
@@ -991,6 +1015,7 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 		sess.Courts = next
 	}
 	session.EnsureHideInactiveDefaults(sess)
+	refreshNextRoundPreview(sess)
 
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session config", "err", err)
@@ -1094,6 +1119,7 @@ func (s *Server) handleAddSessionPlayer(w http.ResponseWriter, r *http.Request) 
 		sess.Suggested = sug
 		sess.SuggestionKey = key
 	}
+	refreshNextRoundPreview(sess)
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not save session")
@@ -1171,6 +1197,7 @@ func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Reques
 	}
 	sess.Suggested = sug
 	sess.SuggestionKey = key
+	refreshNextRoundPreview(sess)
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session", "err", err)
 		writeError(w, http.StatusInternalServerError, "could not save session")
@@ -1238,6 +1265,7 @@ func (s *Server) handleDeleteSessionCourt(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	refreshNextRoundPreview(sess)
 	if err := s.Store.Save(ctx, sess); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not save session")
 		return
@@ -1367,6 +1395,7 @@ func (s *Server) handleResetScores(w http.ResponseWriter, r *http.Request) {
 		sess.Matches = []session.RecordedMatch{}
 		sess.Rounds = []session.Round{}
 		sess.CurrentRound = nil
+		sess.NextRoundPreview = nil
 		rebuildRoundStats(sess)
 		round, key, pickErr := scheduler.PickRound(sess.Players, nil, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
 		if pickErr != nil {
@@ -1374,6 +1403,7 @@ func (s *Server) handleResetScores(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		sess.CurrentRound, sess.SuggestionKey = round, key
+		refreshNextRoundPreview(sess)
 		if err := s.Store.Save(ctx, sess); err != nil {
 			writeError(w, http.StatusInternalServerError, "could not save session")
 			return

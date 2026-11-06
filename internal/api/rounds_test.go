@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strings"
 	"testing"
 
 	"keep-swinging-web/internal/session"
@@ -129,7 +130,8 @@ func TestBuildPreviewGivesRestedPlayerAGame(t *testing.T) {
 		t.Fatal("no open round yet → preview must not be hypothetical")
 	}
 	// Open the generated round and preview the one after it.
-	sess.CurrentRound = prev.Round
+	roundCopy := prev.Round
+	sess.CurrentRound = &roundCopy
 	prev2, err := buildPreview(sess)
 	if err != nil {
 		t.Fatal(err)
@@ -148,6 +150,86 @@ func TestBuildPreviewGivesRestedPlayerAGame(t *testing.T) {
 	}
 	if len(prev2.RestingPlayerIDs) != 1 || played[prev2.RestingPlayerIDs[0]] {
 		t.Fatalf("expected exactly one rested player among a..d: %#v", prev2.RestingPlayerIDs)
+	}
+}
+
+func TestPreviewFrozenAcrossScoreSaves(t *testing.T) {
+	sess := &session.Session{
+		ID: "s", Sport: session.SportTennis, MatchFormat: session.MatchFormatDoubles,
+		Players: []session.Player{
+			{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"},
+			{ID: "d", Name: "D"}, {ID: "e", Name: "E"}, {ID: "f", Name: "F"},
+		},
+		Courts: []session.Court{{ID: "court-1", Name: "Court 1"}, {ID: "court-2", Name: "Court 2"}},
+	}
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+	refreshNextRoundPreview(sess)
+	if sess.NextRoundPreview == nil {
+		t.Fatal("expected preview to be stored")
+	}
+	frozen := *sess.NextRoundPreview
+
+	// Save a court result — the preview must not move.
+	if err := applyRoundCourtScore(sess, sess.CurrentRound.ID, "court-1", 21, 5); err != nil {
+		t.Fatal(err)
+	}
+	if sess.NextRoundPreview == nil || !prevEqual(&frozen, sess.NextRoundPreview) {
+		t.Fatalf("score save must not change the preview: before=%+v after=%+v", frozen, sess.NextRoundPreview)
+	}
+
+	// Planning rest DOES refresh the preview.
+	sess.RestNextPlayerIDs = []string{"a", "b"}
+	refreshNextRoundPreview(sess)
+	if prevEqual(&frozen, sess.NextRoundPreview) {
+		t.Fatal("rest-next change should refresh the preview")
+	}
+}
+
+func prevEqual(a, b *session.RoundPreview) bool {
+	if a == nil || b == nil {
+		return a == b
+	}
+	if a.Hypothetical != b.Hypothetical {
+		return false
+	}
+	if len(a.Round.Slots) != len(b.Round.Slots) {
+		return false
+	}
+	slotIDs := func(slot session.RoundSlot) string {
+		ids := []string{}
+		for _, p := range append(append([]session.Player{}, slot.TeamA...), slot.TeamB...) {
+			ids = append(ids, p.ID)
+		}
+		return strings.Join(ids, ",")
+	}
+	for i := range a.Round.Slots {
+		if slotIDs(a.Round.Slots[i]) != slotIDs(b.Round.Slots[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func TestRecordedMatchesIncludeOpenRoundResults(t *testing.T) {
+	sess := &session.Session{
+		ID: "s", MatchFormat: session.MatchFormatDoubles,
+		Players: []session.Player{{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}},
+		Courts:  []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	scoreA, scoreB := 6, 4
+	sess.CurrentRound = &session.Round{
+		ID: "r", Status: session.RoundStatusOpen,
+		Slots: []session.RoundSlot{{
+			CourtID: "court-1", CourtName: "Court 1", Status: session.RoundSlotStatusCompleted,
+			TeamA: []session.Player{{ID: "a"}, {ID: "b"}}, TeamB: []session.Player{{ID: "c"}, {ID: "d"}},
+			ScoreA: &scoreA, ScoreB: &scoreB,
+		}},
+	}
+	matches := recordedMatches(sess)
+	if len(matches) != 1 || len(matches[0].TeamAIDs) != 2 {
+		t.Fatalf("open round completed courts must be visible to the scheduler: %#v", matches)
 	}
 }
 

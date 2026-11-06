@@ -102,6 +102,14 @@ type Round struct {
 	ClosedAt         *time.Time  `json:"closed_at,omitempty"`
 }
 
+// RoundPreview is a frozen preview of the round after the current one. It is
+// refreshed on round/roster/court/rest changes, not on score saves.
+type RoundPreview struct {
+	Round            Round    `json:"round"`
+	RestingPlayerIDs []string `json:"resting_player_ids,omitempty"`
+	Hypothetical     bool     `json:"hypothetical"`
+}
+
 // RecordedMatch is a finished doubles result.
 type RecordedMatch struct {
 	TeamAIDs []string  `json:"team_a_ids"`
@@ -125,7 +133,9 @@ type Session struct {
 	SuggestionKey string          `json:"suggestion_key,omitempty"` // canonical lineup key for reshuffle exclusion
 	// RestNextPlayerIDs lists players who plan to sit out the NEXT round;
 	// consumed (and cleared) when the next round is created.
-	RestNextPlayerIDs []string       `json:"rest_next_player_ids,omitempty"`
+	RestNextPlayerIDs []string `json:"rest_next_player_ids,omitempty"`
+	// NextRoundPreview is the frozen preview of the round after CurrentRound.
+	NextRoundPreview *RoundPreview `json:"next_round_preview,omitempty"`
 	// SitOutScore is multiplied by (leader GP − your GP) in standings parity.
 	// Omitted/absent in storage ⇒ UI uses DefaultSitOutScore(sport).
 	SitOutScore    *float64       `json:"sit_out_score,omitempty"`
