@@ -158,6 +158,45 @@ func TestPickCourtPlayersErrorsWhenShort(t *testing.T) {
 	}
 }
 
+func TestLineupEncounterPenaltyWeightsPartnerOverOpponent(t *testing.T) {
+	matches := []session.RecordedMatch{
+		{TeamAIDs: []string{"p1", "p2"}, TeamBIDs: []string{"p3", "p4"}, ScoreA: 1, ScoreB: 0},
+	}
+	enc := buildEncounterIndex(matches)
+	partnerRepeat := roundLineup{teamA: [2]string{"p1", "p2"}, teamB: [2]string{"p3", "p4"}}
+	opponentRepeat := roundLineup{teamA: [2]string{"p1", "p3"}, teamB: [2]string{"p2", "p4"}}
+	fresh := roundLineup{teamA: [2]string{"p1", "p5"}, teamB: [2]string{"p6", "p7"}}
+	if got := lineupEncounterPenalty(enc, partnerRepeat); got != 2040 {
+		t.Fatalf("partner repeat on both sides = 2x1000 + 4 repeated opponent pairs, got %d", got)
+	}
+	if got := lineupEncounterPenalty(enc, opponentRepeat); got != 20 {
+		t.Fatalf("two repeated opponent pairs = 2x10, got %d", got)
+	}
+	if got := lineupEncounterPenalty(enc, fresh); got != 0 {
+		t.Fatalf("fresh lineup = 0, got %d", got)
+	}
+}
+
+func TestPickRoundAmericanoAvoidsRepeatedOpponents(t *testing.T) {
+	players := roundPlayers(8, 1)
+	matches := []session.RecordedMatch{{TeamAIDs: []string{"p1", "p2"}, TeamBIDs: []string{"p3", "p4"}}}
+	round, _, err := PickRound(players, matches, session.ShufflingStyleAmericano, courts(1), session.MatchFormatDoubles, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := round.Slots[0]
+	cross := map[string]bool{}
+	for _, a := range slot.TeamA {
+		for _, b := range slot.TeamB {
+			cross[a.ID+b.ID] = true
+			cross[b.ID+a.ID] = true
+		}
+	}
+	if cross["p1p3"] || cross["p1p4"] || cross["p2p3"] || cross["p2p4"] {
+		t.Fatalf("americano should avoid repeating any old opponent pairing: %#v", slot)
+	}
+}
+
 func roundPlayers(n, games int) []session.Player {
 	players := make([]session.Player, n)
 	for i := range players {

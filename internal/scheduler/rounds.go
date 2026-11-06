@@ -47,6 +47,7 @@ func PickRound(players []session.Player, matches []session.RecordedMatch, style 
 		ids[i] = eligible[i].ID
 	}
 	sort.Strings(ids)
+	enc := buildEncounterIndex(matches)
 
 	lineups := make([]roundLineup, 0)
 	if format == session.MatchFormatSingles {
@@ -84,7 +85,7 @@ func PickRound(players []session.Player, matches []session.RecordedMatch, style 
 	var search func(int, int)
 	search = func(courtIndex, start int) {
 		if courtIndex == usable {
-			score := roundScore(chosen, byID, style)
+			score := roundScore(chosen, byID, style, enc)
 			if score < bestScore {
 				bestScore = score
 				best = append(best[:0], chosen...)
@@ -190,6 +191,7 @@ func PickCourtPlayers(players []session.Player, matches []session.RecordedMatch,
 	sort.Strings(ids)
 	byID := playerByID(players)
 	rotation := buildPartnerIndex(matches)
+	enc := buildEncounterIndex(matches)
 
 	var cands []roundLineup
 	if format == session.MatchFormatSingles {
@@ -218,9 +220,9 @@ func PickCourtPlayers(players []session.Player, matches []session.RecordedMatch,
 		return nil, nil, ErrNoLineup
 	}
 	bestIdx := 0
-	bestScore := roundScore(cands[:1], byID, style)
+	bestScore := roundScore(cands[:1], byID, style, enc)
 	for i := 1; i < len(cands); i++ {
-		if s := roundScore(cands[i:i+1], byID, style); s < bestScore {
+		if s := roundScore(cands[i:i+1], byID, style, enc); s < bestScore {
 			bestScore = s
 			bestIdx = i
 		}
@@ -229,7 +231,25 @@ func PickCourtPlayers(players []session.Player, matches []session.RecordedMatch,
 	return playersForIDs(byID, chosen.teamA[:]), playersForIDs(byID, chosen.teamB[:]), nil
 }
 
-func roundScore(lineups []roundLineup, byID map[string]session.Player, style session.ShufflingStyle) int {
+// lineupEncounterPenalty scores how "stale" a lineup's meetings are. Repeated
+// partnerships cost far more than repeated opposition (americano rotates
+// partners first, opponents ideally).
+func lineupEncounterPenalty(enc encounterIndex, lu roundLineup) int {
+	penalty := 0
+	if lu.teamA[1] != "" {
+		penalty += 1000 * enc.partnerCount(lu.teamA[0], lu.teamA[1])
+		penalty += 1000 * enc.partnerCount(lu.teamB[0], lu.teamB[1])
+		for _, a := range lu.teamA {
+			for _, b := range lu.teamB {
+				penalty += 10 * enc.opponentCount(a, b)
+			}
+		}
+		return penalty
+	}
+	return 10 * enc.opponentCount(lu.teamA[0], lu.teamB[0])
+}
+
+func roundScore(lineups []roundLineup, byID map[string]session.Player, style session.ShufflingStyle, enc encounterIndex) int {
 	sum := 0
 	for _, lu := range lineups {
 		sum += byID[lu.teamA[0]].GamesPlayed + byID[lu.teamB[0]].GamesPlayed
@@ -237,7 +257,12 @@ func roundScore(lineups []roundLineup, byID map[string]session.Player, style ses
 			sum += byID[lu.teamA[1]].GamesPlayed + byID[lu.teamB[1]].GamesPlayed
 		}
 	}
-	if style == session.ShufflingStyleMexicanoTopVsTop {
+	switch style {
+	case session.ShufflingStyleAmericano:
+		for _, lu := range lineups {
+			sum += lineupEncounterPenalty(enc, lu)
+		}
+	case session.ShufflingStyleMexicanoTopVsTop:
 		return -sum * 1000
 	}
 	return sum
