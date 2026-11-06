@@ -197,6 +197,96 @@ func TestPickRoundAmericanoAvoidsRepeatedOpponents(t *testing.T) {
 	}
 }
 
+func TestPickRoundMexicanoPairsByPointsLeaderboard(t *testing.T) {
+	players := roundPlayers(8, 0)
+	matches := []session.RecordedMatch{
+		{TeamAIDs: []string{"p1", "p2"}, TeamBIDs: []string{"p3", "p4"}, ScoreA: 30, ScoreB: 10},
+	}
+	// points: p1=p2=30, p3=p4=10, p5..p8=0 → ranks p1,p2,p3,p4,p5,p6,p7,p8.
+	round, _, err := PickRound(players, matches, session.ShufflingStyleMexicano, courts(1), session.MatchFormatDoubles, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := round.Slots[0]
+	left := idsOfSlot(slot.TeamA)
+	right := idsOfSlot(slot.TeamB)
+	canonicalLeft := map[string]bool{"p1": true, "p3": true}
+	canonicalRight := map[string]bool{"p2": true, "p4": true}
+	same := func(a, b map[string]bool) bool {
+		for k := range a {
+			if !b[k] {
+				return false
+			}
+		}
+		return len(a) == len(b)
+	}
+	if !(same(left, canonicalLeft) && same(right, canonicalRight)) && !(same(left, canonicalRight) && same(right, canonicalLeft)) {
+		t.Fatalf("mexicano should pair 1st+3rd vs 2nd+4th: %#v", slot)
+	}
+}
+
+func TestPickRoundMexicanoTopVsTopPairsOneTwoVsThreeFour(t *testing.T) {
+	players := roundPlayers(4, 0)
+	round, _, err := PickRound(players, nil, session.ShufflingStyleMexicanoTopVsTop, courts(1), session.MatchFormatDoubles, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	slot := round.Slots[0]
+	same := func(a, b map[string]bool) bool {
+		for k := range a {
+			if !b[k] {
+				return false
+			}
+		}
+		return len(a) == len(b)
+	}
+	top := map[string]bool{"p1": true, "p2": true}
+	bottom := map[string]bool{"p3": true, "p4": true}
+	if !(same(idsOfSlot(slot.TeamA), top) && same(idsOfSlot(slot.TeamB), bottom)) && !(same(idsOfSlot(slot.TeamA), bottom) && same(idsOfSlot(slot.TeamB), top)) {
+		t.Fatalf("top_vs_top should pair 1&2 vs 3&4: %#v", slot)
+	}
+}
+
+func TestPickRoundMexicanoRestsMostPlayed(t *testing.T) {
+	players := roundPlayers(6, 0)
+	players[4].GamesPlayed = 5
+	players[5].GamesPlayed = 5
+	round, _, err := PickRound(players, nil, session.ShufflingStyleMexicano, courts(1), session.MatchFormatDoubles, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	played := map[string]bool{}
+	for _, p := range append(round.Slots[0].TeamA, round.Slots[0].TeamB...) {
+		played[p.ID] = true
+	}
+	if played["p5"] || played["p6"] {
+		t.Fatalf("players with high GP should rest: %#v", round)
+	}
+}
+
+func TestPickRoundMexicanoReshuffleFallsBackToSearch(t *testing.T) {
+	players := roundPlayers(4, 0)
+	_, key, err := PickRound(players, nil, session.ShufflingStyleMexicano, courts(1), session.MatchFormatDoubles, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, nextKey, err := PickRound(players, nil, session.ShufflingStyleMexicano, courts(1), session.MatchFormatDoubles, key, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key == nextKey {
+		t.Fatalf("mexicano reshuffle must produce a different lineup: %q", nextKey)
+	}
+}
+
+func idsOfSlot(team []session.Player) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range team {
+		out[p.ID] = true
+	}
+	return out
+}
+
 func roundPlayers(n, games int) []session.Player {
 	players := make([]session.Player, n)
 	for i := range players {

@@ -48,83 +48,104 @@ func PickRound(players []session.Player, matches []session.RecordedMatch, style 
 	}
 	sort.Strings(ids)
 	enc := buildEncounterIndex(matches)
+	points := playerPoints(matches)
 
-	lineups := make([]roundLineup, 0)
-	if format == session.MatchFormatSingles {
-		for i := 0; i < len(ids); i++ {
-			for j := i + 1; j < len(ids); j++ {
-				lineups = append(lineups, roundLineup{teamA: [2]string{ids[i], ""}, teamB: [2]string{ids[j], ""}})
-			}
-		}
-	} else {
-		eachQuartet(ids, func(q [4]string) {
-			for _, lu := range lineupsForQuartet(q) {
-				lineups = append(lineups, roundLineup{teamA: lu.TeamA, teamB: lu.TeamB})
-			}
-		})
-	}
-	if len(lineups) == 0 && usable > 0 {
-		return nil, "", ErrNoRound
+	// Mexicano rounds are built deterministically from the points leaderboard.
+	// The exhaustive search below is only their reshuffle fallback, which uses
+	// americano encounter scoring (the user explicitly broke the ladder).
+	searchStyle := style
+	if isMexicanoStyle(style) {
+		searchStyle = session.ShufflingStyleAmericano
 	}
 
-	rotation := buildPartnerIndex(matches)
-	rotated := make([]roundLineup, 0, len(lineups))
-	for _, lu := range lineups {
-		if format == session.MatchFormatSingles || lineupPassesPartnerRotation(Lineup{TeamA: lu.teamA, TeamB: lu.teamB}, rotation, ids) {
-			rotated = append(rotated, lu)
-		}
-	}
-	if len(rotated) > 0 {
-		lineups = rotated
-	}
-
-	chosen := make([]roundLineup, usable)
-	used := make(map[string]bool)
 	var best []roundLineup
-	bestScore := int(^uint(0) >> 1)
-	var search func(int, int)
-	search = func(courtIndex, start int) {
-		if courtIndex == usable {
-			score := roundScore(chosen, byID, style, enc)
-			if score < bestScore {
-				bestScore = score
-				best = append(best[:0], chosen...)
-			} else if score == bestScore && len(best) > 0 && pickIndex(2) == 0 {
-				best = append(best[:0], chosen...)
-			}
-			return
+	if usable > 0 && isMexicanoStyle(style) {
+		playing := selectPlaying(ids, byID, usable*playersPerCourt)
+		ranked := rankPlayersByPoints(playing, points)
+		if format == session.MatchFormatSingles {
+			best = constructMexicanoSingles(ranked)
+		} else {
+			best = constructMexicanoDoubles(ranked, style)
 		}
-		for i := start; i < len(lineups); i++ {
-			lu := lineups[i]
-			idsForLineup := []string{lu.teamA[0], lu.teamB[0]}
-			if format == session.MatchFormatDoubles {
-				idsForLineup = append(idsForLineup, lu.teamA[1], lu.teamB[1])
-			}
-			ok := true
-			for _, id := range idsForLineup {
-				if used[id] {
-					ok = false
-					break
+		if excludeKey != "" && roundKey(best) == excludeKey {
+			best = nil // reshuffle: fall through to the search below
+		}
+	}
+	if best == nil && usable > 0 {
+		lineups := make([]roundLineup, 0)
+		if format == session.MatchFormatSingles {
+			for i := 0; i < len(ids); i++ {
+				for j := i + 1; j < len(ids); j++ {
+					lineups = append(lineups, roundLineup{teamA: [2]string{ids[i], ""}, teamB: [2]string{ids[j], ""}})
 				}
 			}
-			if !ok {
-				continue
-			}
-			for _, id := range idsForLineup {
-				used[id] = true
-			}
-			chosen[courtIndex] = lu
-			if courtIndex+1 == usable && excludeKey != "" && roundKey(chosen) == excludeKey {
-				// Do not reuse the complete round during reshuffle.
-			} else {
-				search(courtIndex+1, i+1)
-			}
-			for _, id := range idsForLineup {
-				delete(used, id)
+		} else {
+			eachQuartet(ids, func(q [4]string) {
+				for _, lu := range lineupsForQuartet(q) {
+					lineups = append(lineups, roundLineup{teamA: lu.TeamA, teamB: lu.TeamB})
+				}
+			})
+		}
+		if len(lineups) == 0 {
+			return nil, "", ErrNoRound
+		}
+
+		rotation := buildPartnerIndex(matches)
+		rotated := make([]roundLineup, 0, len(lineups))
+		for _, lu := range lineups {
+			if format == session.MatchFormatSingles || lineupPassesPartnerRotation(Lineup{TeamA: lu.teamA, TeamB: lu.teamB}, rotation, ids) {
+				rotated = append(rotated, lu)
 			}
 		}
-	}
-	if usable > 0 {
+		if len(rotated) > 0 {
+			lineups = rotated
+		}
+
+		chosen := make([]roundLineup, usable)
+		used := make(map[string]bool)
+		bestScore := int(^uint(0) >> 1)
+		var search func(int, int)
+		search = func(courtIndex, start int) {
+			if courtIndex == usable {
+				score := roundScore(chosen, byID, searchStyle, enc)
+				if score < bestScore {
+					bestScore = score
+					best = append(best[:0], chosen...)
+				} else if score == bestScore && len(best) > 0 && pickIndex(2) == 0 {
+					best = append(best[:0], chosen...)
+				}
+				return
+			}
+			for i := start; i < len(lineups); i++ {
+				lu := lineups[i]
+				idsForLineup := []string{lu.teamA[0], lu.teamB[0]}
+				if format == session.MatchFormatDoubles {
+					idsForLineup = append(idsForLineup, lu.teamA[1], lu.teamB[1])
+				}
+				ok := true
+				for _, id := range idsForLineup {
+					if used[id] {
+						ok = false
+						break
+					}
+				}
+				if !ok {
+					continue
+				}
+				for _, id := range idsForLineup {
+					used[id] = true
+				}
+				chosen[courtIndex] = lu
+				if courtIndex+1 == usable && excludeKey != "" && roundKey(chosen) == excludeKey {
+					// Do not reuse the complete round during reshuffle.
+				} else {
+					search(courtIndex+1, i+1)
+				}
+				for _, id := range idsForLineup {
+					delete(used, id)
+				}
+			}
+		}
 		search(0, 0)
 		if len(best) == 0 {
 			return nil, "", ErrNoRound
@@ -266,6 +287,78 @@ func roundScore(lineups []roundLineup, byID map[string]session.Player, style ses
 		return -sum * 1000
 	}
 	return sum
+}
+
+func isMexicanoStyle(style session.ShufflingStyle) bool {
+	switch style {
+	case session.ShufflingStyleMexicano, session.ShufflingStyleMexicanoTopVsTop, session.ShufflingStyleMexicanoTopVsBottom:
+		return true
+	}
+	return false
+}
+
+// rankPlayersByPoints orders ids by cumulative points (desc), tie-break ID asc.
+func rankPlayersByPoints(ids []string, points map[string]int) []string {
+	out := append([]string(nil), ids...)
+	sort.Slice(out, func(i, j int) bool {
+		pi, pj := points[out[i]], points[out[j]]
+		if pi != pj {
+			return pi > pj
+		}
+		return out[i] < out[j]
+	})
+	return out
+}
+
+// selectPlaying returns the count players with the lowest GamesPlayed (ties by
+// ID) — the minimum total-GP subset, i.e. who is most due to play.
+func selectPlaying(ids []string, byID map[string]session.Player, count int) []string {
+	if count > len(ids) {
+		count = len(ids)
+	}
+	sorted := append([]string(nil), ids...)
+	sort.Slice(sorted, func(i, j int) bool {
+		gi, gj := byID[sorted[i]].GamesPlayed, byID[sorted[j]].GamesPlayed
+		if gi != gj {
+			return gi < gj
+		}
+		return sorted[i] < sorted[j]
+	})
+	return sorted[:count]
+}
+
+// mexicanoPairing returns the team split for one rank-ordered quartet
+// (r[0] has the most points): canonical 1&3 vs 2&4; top_vs_top 1&2 vs 3&4;
+// top_vs_bottom 1&4 vs 2&3.
+func mexicanoPairing(style session.ShufflingStyle, r [4]string) Lineup {
+	switch style {
+	case session.ShufflingStyleMexicanoTopVsTop:
+		return Lineup{TeamA: [2]string{r[0], r[1]}, TeamB: [2]string{r[2], r[3]}}
+	case session.ShufflingStyleMexicanoTopVsBottom:
+		return Lineup{TeamA: [2]string{r[0], r[3]}, TeamB: [2]string{r[1], r[2]}}
+	default:
+		return Lineup{TeamA: [2]string{r[0], r[2]}, TeamB: [2]string{r[1], r[3]}}
+	}
+}
+
+// constructMexicanoDoubles chunks rank-ordered players into quartets and pairs
+// each quartet per the style. Court i receives quartet i.
+func constructMexicanoDoubles(ranked []string, style session.ShufflingStyle) []roundLineup {
+	var out []roundLineup
+	for i := 0; i+3 < len(ranked); i += 4 {
+		lu := mexicanoPairing(style, [4]string{ranked[i], ranked[i+1], ranked[i+2], ranked[i+3]})
+		out = append(out, roundLineup{teamA: lu.TeamA, teamB: lu.TeamB})
+	}
+	return out
+}
+
+// constructMexicanoSingles pairs rank-ordered players 1v2, 3v4, …
+func constructMexicanoSingles(ranked []string) []roundLineup {
+	var out []roundLineup
+	for i := 0; i+1 < len(ranked); i += 2 {
+		out = append(out, roundLineup{teamA: [2]string{ranked[i], ""}, teamB: [2]string{ranked[i+1], ""}})
+	}
+	return out
 }
 
 func lineupKeyFor(lu roundLineup) string {
