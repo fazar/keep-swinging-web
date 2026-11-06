@@ -111,8 +111,6 @@ func PickRound(players []session.Player, matches []session.RecordedMatch, style 
 				if score < bestScore {
 					bestScore = score
 					best = append(best[:0], chosen...)
-				} else if score == bestScore && len(best) > 0 && pickIndex(2) == 0 {
-					best = append(best[:0], chosen...)
 				}
 				return
 			}

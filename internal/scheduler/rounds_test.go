@@ -279,6 +279,25 @@ func TestPickRoundMexicanoReshuffleFallsBackToSearch(t *testing.T) {
 	}
 }
 
+func TestPickRoundDeterministicForSameState(t *testing.T) {
+	players := roundPlayers(8, 0)
+	matches := []session.RecordedMatch{{TeamAIDs: []string{"p1", "p2"}, TeamBIDs: []string{"p3", "p4"}}}
+	var first string
+	for i := 0; i < 20; i++ {
+		_, key, err := PickRound(players, matches, session.ShufflingStyleAmericano, courts(2), session.MatchFormatDoubles, "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if i == 0 {
+			first = key
+			continue
+		}
+		if key != first {
+			t.Fatalf("same inputs produced different rounds: %q vs %q", first, key)
+		}
+	}
+}
+
 func idsOfSlot(team []session.Player) map[string]bool {
 	out := map[string]bool{}
 	for _, p := range team {

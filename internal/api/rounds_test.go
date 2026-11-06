@@ -233,6 +233,55 @@ func TestRecordedMatchesIncludeOpenRoundResults(t *testing.T) {
 	}
 }
 
+func TestPreviewMatchesRoundGeneratedAtCompletion(t *testing.T) {
+	sess := &session.Session{
+		ID:          "s",
+		Sport:       session.SportTennis,
+		MatchFormat: session.MatchFormatDoubles,
+		Players: []session.Player{
+			{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"},
+			{ID: "d", Name: "D"}, {ID: "e", Name: "E"}, {ID: "f", Name: "F"},
+		},
+		Courts: []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+	refreshNextRoundPreview(sess)
+	preview := *sess.NextRoundPreview
+
+	// Play and complete the current round with real scores.
+	scoreA, scoreB := 21, 5
+	for i := range sess.CurrentRound.Slots {
+		slot := &sess.CurrentRound.Slots[i]
+		slot.ScoreA, slot.ScoreB = &scoreA, &scoreB
+		slot.Status = session.RoundSlotStatusCompleted
+	}
+	sess.Rounds = append(sess.Rounds, *sess.CurrentRound)
+	rebuildRoundStats(sess)
+	sess.CurrentRound = nil
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+
+	slotPair := func(slot session.RoundSlot) string {
+		ids := []string{}
+		for _, p := range append(append([]session.Player{}, slot.TeamA...), slot.TeamB...) {
+			ids = append(ids, p.ID)
+		}
+		return strings.Join(ids, ",")
+	}
+	if len(preview.Round.Slots) != len(sess.CurrentRound.Slots) {
+		t.Fatalf("slot count mismatch: preview=%d actual=%d", len(preview.Round.Slots), len(sess.CurrentRound.Slots))
+	}
+	for i := range preview.Round.Slots {
+		if slotPair(preview.Round.Slots[i]) != slotPair(sess.CurrentRound.Slots[i]) {
+			t.Fatalf("round %d differs from preview:\npreview %s\nactual  %s", i,
+				slotPair(preview.Round.Slots[i]), slotPair(sess.CurrentRound.Slots[i]))
+		}
+	}
+}
+
 func TestLegacySessionMigratesToRound(t *testing.T) {
 	sess := &session.Session{
 		ID:          "legacy",
