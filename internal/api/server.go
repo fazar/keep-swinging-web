@@ -690,8 +690,8 @@ func (s *Server) handleCompleteRound(w http.ResponseWriter, r *http.Request) {
 	sess.CurrentRound.Status = session.RoundStatusCompleted
 	sess.CurrentRound.ClosedAt = &now
 	sess.Rounds = append(sess.Rounds, *sess.CurrentRound)
-	rebuildRoundStats(sess)
 	sess.CurrentRound = nil
+	rebuildRoundStats(sess)
 	if err := generateNextRound(sess); err != nil {
 		writeError(w, http.StatusInternalServerError, "could not build next round")
 		return

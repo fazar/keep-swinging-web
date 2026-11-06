@@ -282,6 +282,35 @@ func TestPreviewMatchesRoundGeneratedAtCompletion(t *testing.T) {
 	}
 }
 
+func TestCompletingRoundCountsEachGameOnce(t *testing.T) {
+	sess := &session.Session{
+		ID:          "s",
+		Sport:       session.SportTennis,
+		MatchFormat: session.MatchFormatDoubles,
+		Players: []session.Player{
+			{ID: "a", Name: "A"}, {ID: "b", Name: "B"}, {ID: "c", Name: "C"}, {ID: "d", Name: "D"},
+		},
+		Courts: []session.Court{{ID: "court-1", Name: "Court 1"}},
+	}
+	if err := generateNextRound(sess); err != nil {
+		t.Fatal(err)
+	}
+	scoreA, scoreB := 21, 5
+	if err := applyRoundCourtScore(sess, sess.CurrentRound.ID, "court-1", scoreA, scoreB); err != nil {
+		t.Fatal(err)
+	}
+	// Same sequence as handleCompleteRound: archive, clear, then rebuild.
+	sess.CurrentRound.Status = session.RoundStatusCompleted
+	sess.Rounds = append(sess.Rounds, *sess.CurrentRound)
+	sess.CurrentRound = nil
+	rebuildRoundStats(sess)
+	for _, p := range sess.Players {
+		if p.GamesPlayed != 1 {
+			t.Fatalf("player %s played once but GP=%d (double count?)", p.ID, p.GamesPlayed)
+		}
+	}
+}
+
 func TestLegacySessionMigratesToRound(t *testing.T) {
 	sess := &session.Session{
 		ID:          "legacy",
