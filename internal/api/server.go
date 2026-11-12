@@ -1087,55 +1087,15 @@ func (s *Server) handleAddSessionPlayer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	for _, p := range sess.Players {
-		if !p.Inactive && strings.EqualFold(strings.TrimSpace(p.Name), name) {
-			writeError(w, http.StatusBadRequest, "a player with that name is already in the shuffle")
-			return
-		}
+	if _, err := applyAddSessionPlayer(sess, name); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
 	}
 
-	reviveIdx := -1
-	for i := range sess.Players {
-		p := sess.Players[i]
-		if p.Inactive && strings.EqualFold(strings.TrimSpace(p.Name), name) {
-			reviveIdx = i
-			break
-		}
-	}
-
-	if reviveIdx >= 0 {
-		sess.Players[reviveIdx].Inactive = false
-	} else {
-		if len(sess.Players) >= 16 {
-			writeError(w, http.StatusBadRequest, "maximum 16 players per session")
-			return
-		}
-		newID := newPlayerID()
-		seen := playerIDSet(sess.Players)
-		for seen[newID] {
-			newID = newPlayerID()
-		}
-		sess.Players = append(sess.Players, session.Player{ID: newID, Name: name})
-	}
-
-	if session.UsesRoundModel(sess) {
-		if sess.CurrentRound == nil || sess.CurrentRound.Status != session.RoundStatusOpen {
-			writeError(w, http.StatusBadRequest, "no open round to update")
-			return
-		}
-		for _, slot := range sess.CurrentRound.Slots {
-			if slot.Status == session.RoundSlotStatusCompleted {
-				writeError(w, http.StatusBadRequest, "cannot add a player after saving a court result")
-				return
-			}
-		}
-		round, key, pickErr := scheduler.PickRound(sess.Players, recordedMatches(sess), sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
-		if pickErr != nil {
-			writeError(w, http.StatusBadRequest, "could not refresh round")
-			return
-		}
-		sess.CurrentRound, sess.SuggestionKey = round, key
-	} else {
+	// Round-model sessions keep the open round untouched: the newcomer is only
+	// on the roster and the refreshed next-round preview picks them up. Legacy
+	// sessions have no round concept, so the suggested match is re-picked.
+	if !session.UsesRoundModel(sess) {
 		var sug *session.SuggestedMatch
 		var key string
 		var errPick error
@@ -1159,6 +1119,34 @@ func (s *Server) handleAddSessionPlayer(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	writeJSON(w, http.StatusOK, sess)
+}
+
+// applyAddSessionPlayer appends name to the roster or revives an inactive
+// player with the same name. It reports whether an existing player was revived.
+func applyAddSessionPlayer(sess *session.Session, name string) (bool, error) {
+	for _, p := range sess.Players {
+		if !p.Inactive && strings.EqualFold(strings.TrimSpace(p.Name), name) {
+			return false, errors.New("a player with that name is already in the shuffle")
+		}
+	}
+	for i := range sess.Players {
+		p := sess.Players[i]
+		if p.Inactive && strings.EqualFold(strings.TrimSpace(p.Name), name) {
+			p.Inactive = false
+			sess.Players[i] = p
+			return true, nil
+		}
+	}
+	if len(sess.Players) >= 16 {
+		return false, errors.New("maximum 16 players per session")
+	}
+	newID := newPlayerID()
+	seen := playerIDSet(sess.Players)
+	for seen[newID] {
+		newID = newPlayerID()
+	}
+	sess.Players = append(sess.Players, session.Player{ID: newID, Name: name})
+	return false, nil
 }
 
 func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Request) {

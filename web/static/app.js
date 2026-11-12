@@ -857,6 +857,9 @@ function renderSessionSetup(sess) {
   const activeInShuffle = activePl.length;
   const canRemoveFromShuffle = activeInShuffle > 4;
 
+  const addHint = $("#session-add-player-hint");
+  if (addHint) addHint.hidden = !isRoundSession(sess);
+
   const ul = $("#session-setup-player-list");
   if (ul) {
     ul.innerHTML = "";
@@ -1601,7 +1604,10 @@ $("#form-add-session-player")?.addEventListener("submit", async (e) => {
     refreshSessionView(updated);
     const nameIn = $("#session-new-player-name");
     if (nameIn) nameIn.value = "";
-    toast(reviving ? `${name} is back in the shuffle` : `Added ${name}`);
+    const joinsNext = isRoundSession(updated) ? " — joins at the next round" : "";
+    toast(
+      reviving ? `${name} is back in the shuffle${joinsNext}` : `Added ${name}${joinsNext}`,
+    );
   } catch (err) {
     toast(err.message);
   }
