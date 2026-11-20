@@ -136,8 +136,6 @@ func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	k0 := session.DefaultSitOutScore(sp)
 	sess.SitOutScore = &k0
 
-	session.EnsureHideInactiveDefaults(sess)
-
 	var sug *session.SuggestedMatch
 	var key string
 	var errPick error
@@ -946,11 +944,9 @@ func rebuildRoundStats(sess *session.Session) {
 }
 
 type patchSessionConfigBody struct {
-	SitOutScore               *float64 `json:"sit_out_score"`
-	HideInactiveFromStandings *bool    `json:"hide_inactive_from_standings"`
-	HideInactiveFromMatches   *bool    `json:"hide_inactive_from_matches"`
-	CourtCount                *int     `json:"court_count"`
-	Courts                    []string `json:"courts"`
+	SitOutScore *float64 `json:"sit_out_score"`
+	CourtCount  *int     `json:"court_count"`
+	Courts      []string `json:"courts"`
 }
 
 func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request) {
@@ -973,11 +969,9 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 		return
 	}
 	hasK := body.SitOutScore != nil
-	hasHS := body.HideInactiveFromStandings != nil
-	hasHM := body.HideInactiveFromMatches != nil
 	hasCourtCount := body.CourtCount != nil
 	hasCourts := body.Courts != nil
-	if !hasK && !hasHS && !hasHM && !hasCourtCount && !hasCourts {
+	if !hasK && !hasCourtCount && !hasCourts {
 		writeError(w, http.StatusBadRequest, "provide session config fields")
 		return
 	}
@@ -1013,12 +1007,6 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 		}
 		sess.SitOutScore = &v
 	}
-	if hasHS {
-		sess.HideInactiveFromStandings = body.HideInactiveFromStandings
-	}
-	if hasHM {
-		sess.HideInactiveFromMatches = body.HideInactiveFromMatches
-	}
 	if hasCourtCount || hasCourts {
 		oldCourts := sess.Courts
 		count := len(oldCourts)
@@ -1047,7 +1035,6 @@ func (s *Server) handlePatchSessionConfig(w http.ResponseWriter, r *http.Request
 		}
 		sess.Courts = next
 	}
-	session.EnsureHideInactiveDefaults(sess)
 	refreshNextRoundPreview(sess)
 
 	if err := s.Store.Save(ctx, sess); err != nil {

@@ -84,7 +84,6 @@ func (s *Store) Get(ctx context.Context, id string) (*session.Session, error) {
 	if err := json.Unmarshal(raw, &sess); err != nil {
 		return nil, err
 	}
-	session.EnsureHideInactiveDefaults(&sess)
 	return &sess, nil
 }
 

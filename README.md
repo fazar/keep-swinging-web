@@ -58,7 +58,7 @@ Environment variables (see `.env.example`):
 | `PATCH` | `/api/sessions/{id}/matches/{match_index}` | Body: `{"score_a":6,"score_b":4}` — updates only scores; rewinds then reapplies standings and refreshes lineup |
 | `POST` | `/api/sessions/{id}/reshuffle` | Optional body: `{"resting_player_ids":["..."]}` for round sessions (recorded on the round; applies to that round only) and `{"exclude_player_ids":["..."]}` for legacy excludes |
 | `POST` | `/api/sessions/{id}/reset` | Clears match history and zeros standings; keeps roster (including inactive flags); same player ids/names |
-| `PATCH` | `/api/sessions/{id}/config` | Partial update: `sit_out_score` (0–1000, optional unless no other keys), `hide_inactive_from_standings`, `hide_inactive_from_matches` (each optional; booleans — when **true**, away players are omitted from standings / finished games that include any away player are hidden from history and standings aggregates on clients that honor them); both default **true** when omitted from stored JSON |
+| `PATCH` | `/api/sessions/{id}/config` | Partial update: `sit_out_score` (0–1000, optional unless no other keys), `court_count`, `courts`. Away players always stay visible in standings and history; they are only excluded from matchup rotation |
 | `POST` | `/api/sessions/{id}/rounds` | Generate the next synchronized multi-court round; rejects while an open round exists |
 | `PATCH` | `/api/sessions/{id}/rounds/{round_id}/courts/{court_id}` | Save or update one court's scores using the teams already assigned to that court |
 | `DELETE` | `/api/sessions/{id}/rounds/{round_id}/courts/{court_id}` | Clear an open court result and return it to pending |

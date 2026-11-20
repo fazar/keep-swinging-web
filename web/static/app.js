@@ -275,42 +275,6 @@ function effectiveSitOutScore(sess) {
   return defaultSitOutScoreForSport(sess.sport);
 }
 
-/** When true (default), omit away (inactive) players from standings tables. */
-function effectiveHideInactiveFromStandings(sess) {
-  const v = sess?.hide_inactive_from_standings;
-  return v !== false;
-}
-
-/** When true (default), finished matches that involve anyone currently away are ignored (history + standings aggregates). */
-function effectiveHideInactiveFromMatches(sess) {
-  const v = sess?.hide_inactive_from_matches;
-  return v !== false;
-}
-
-function standingsPlayersForDisplay(sess) {
-  const pl = sess?.players ?? [];
-  if (!effectiveHideInactiveFromStandings(sess)) return [...pl];
-  return pl.filter((p) => !p.inactive);
-}
-
-/** id → Player for roster lookups */
-function idToPlayerById(players) {
-  const m = Object.create(null);
-  for (const p of players || []) m[p.id] = p;
-  return m;
-}
-
-/** Match touches a player marked inactive on the roster (current away state). */
-function matchInvolvesInactivePlayer(m, playerById) {
-  for (const id of m.team_a_ids || []) {
-    if (playerById[id]?.inactive) return true;
-  }
-  for (const id of m.team_b_ids || []) {
-    if (playerById[id]?.inactive) return true;
-  }
-  return false;
-}
-
 function roundMatches(sess) {
   const rounds = [...(sess?.rounds || [])];
   if (sess?.current_round) rounds.push(sess.current_round);
@@ -331,71 +295,6 @@ function roundMatches(sess) {
         round_slot: true,
       })),
   );
-}
-
-/** Matches used for standings aggregates and counted in history when hiding games with away roster members */
-function matchesForStandingsAndAggregate(sess) {
-  const all = [...(sess?.matches ?? []), ...roundMatches(sess)];
-  if (!sess || !effectiveHideInactiveFromMatches(sess)) return [...all];
-  const byId = idToPlayerById(sess.players || []);
-  return all.filter((m) => !matchInvolvesInactivePlayer(m, byId));
-}
-
-/** Recompute W/L/D/GP from a subset of matches (for league tab parity with filters). */
-function recomputeLeagueStatsFromMatches(matches, players) {
-  const stats = Object.create(null);
-  for (const p of players) {
-    stats[p.id] = {
-      games_played: 0,
-      wins: 0,
-      losses: 0,
-      draws: 0,
-    };
-  }
-
-  for (const m of matches || []) {
-    const sa = Number(m.score_a) || 0;
-    const sb = Number(m.score_b) || 0;
-    const a = m.team_a_ids || [];
-    const b = m.team_b_ids || [];
-    const ids = [...a, ...b];
-    for (const id of ids) {
-      const s = stats[id];
-      if (s) s.games_played += 1;
-    }
-    if (sa > sb) {
-      for (const id of a) {
-        const s = stats[id];
-        if (s) s.wins += 1;
-      }
-      for (const id of b) {
-        const s = stats[id];
-        if (s) s.losses += 1;
-      }
-    } else if (sb > sa) {
-      for (const id of b) {
-        const s = stats[id];
-        if (s) s.wins += 1;
-      }
-      for (const id of a) {
-        const s = stats[id];
-        if (s) s.losses += 1;
-      }
-    } else {
-      for (const id of ids) {
-        const s = stats[id];
-        if (s) s.draws += 1;
-      }
-    }
-  }
-
-  return players.map((p) => ({
-    ...p,
-    games_played: stats[p.id]?.games_played ?? 0,
-    wins: stats[p.id]?.wins ?? 0,
-    losses: stats[p.id]?.losses ?? 0,
-    draws: stats[p.id]?.draws ?? 0,
-  }));
 }
 
 function formatPartners(players, separator) {
@@ -462,7 +361,7 @@ function refreshSessionView(sess) {
   renderStandings(sess, k);
   if (isRoundSession(sess)) renderRoundBoard(sess);
   else renderSuggestion(sess);
-  renderHistory([...sess.matches, ...roundMatches(sess)], sess.players, sess);
+  renderHistory([...sess.matches, ...roundMatches(sess)], sess.players);
   fillRestingPlayers(sess);
   fillRestNextPlayers(sess);
   void loadNextRoundPreview(sess);
@@ -732,7 +631,7 @@ function standingsRankTd(competitionRank, ranks) {
   return `<td class="standings-rank-cell" aria-label="Rank ${competitionRank}"><span aria-hidden="true">${e}</span></td>`;
 }
 
-function renderMatchPointStandings(matches, players, parityK, emptyHint) {
+function renderMatchPointStandings(matches, players, parityK) {
   const tb = $("#standings-scored tbody");
   if (!tb) return;
   tb.innerHTML = "";
@@ -740,10 +639,7 @@ function renderMatchPointStandings(matches, players, parityK, emptyHint) {
   const hasPlay = rows.some((r) => r.gp > 0);
   if (!hasPlay) {
     const tr = document.createElement("tr");
-    const msg =
-      typeof emptyHint === "string" && emptyHint
-        ? emptyHint
-        : "No matches yet. Record a result to see scoring totals.";
+    const msg = "No matches yet. Record a result to see scoring totals.";
     tr.innerHTML = `<td colspan="5" class="standings-empty">${escapeHtml(msg)}</td>`;
     tb.appendChild(tr);
     return;
@@ -811,46 +707,16 @@ function renderLeagueStandings(players, parityK) {
 }
 
 function renderStandings(sess, parityK = effectiveSitOutScore(sess)) {
-  const pl = standingsPlayersForDisplay(sess);
-  const mAgg = matchesForStandingsAndAggregate(sess);
-  const all = sess?.matches ?? [];
-  const filteredAllAway =
-    sess &&
-    effectiveHideInactiveFromMatches(sess) &&
-    all.length > 0 &&
-    mAgg.length === 0;
-  const mpHint = filteredAllAway
-    ? "Games that include players currently Away are hidden. Turn off Session setup or mark players Active to include them."
-    : null;
-  renderMatchPointStandings(mAgg, pl, parityK, mpHint);
-  const leaguePl =
-    sess && effectiveHideInactiveFromMatches(sess)
-      ? recomputeLeagueStatsFromMatches(mAgg, pl)
-      : pl;
-  renderLeagueStandings(leaguePl, parityK);
+  const pl = sess?.players ?? [];
+  const mAgg = [...(sess?.matches ?? []), ...roundMatches(sess)];
+  renderMatchPointStandings(mAgg, pl, parityK);
+  renderLeagueStandings(pl, parityK);
 }
 
 function renderSessionSetup(sess) {
   renderCourtConfig(sess);
   const scoreInp = $("#config-sit-out-score");
   if (scoreInp) scoreInp.value = String(effectiveSitOutScore(sess));
-
-  const chkStandings = $("#config-hide-inactive-standings");
-  const chkMatches = $("#config-hide-inactive-matches");
-  if (chkStandings) {
-    chkStandings.checked = effectiveHideInactiveFromStandings(sess);
-    chkStandings.setAttribute(
-      "aria-checked",
-      chkStandings.checked ? "true" : "false",
-    );
-  }
-  if (chkMatches) {
-    chkMatches.checked = effectiveHideInactiveFromMatches(sess);
-    chkMatches.setAttribute(
-      "aria-checked",
-      chkMatches.checked ? "true" : "false",
-    );
-  }
 
   const plist = sess.players || [];
   const activePl = shuffleActivePlayers(plist);
@@ -1055,14 +921,10 @@ function renderSuggestion(sess) {
   window.__suggestion = sug;
 }
 
-function renderHistory(matches, players, sess) {
+function renderHistory(matches, players) {
   const ul = $("#history");
   ul.innerHTML = "";
   const nameMap = idToNameMap(players);
-  const partnerById = idToPlayerById(players);
-  const hideMatchesWithAway = sess
-    ? effectiveHideInactiveFromMatches(sess)
-    : true;
   const list = matches || [];
   const editingIdx = window.__historyEditIdx;
 
@@ -1081,9 +943,6 @@ function renderHistory(matches, players, sess) {
 
   for (let matchIndex = list.length - 1; matchIndex >= 0; matchIndex--) {
     const m = list[matchIndex];
-    if (hideMatchesWithAway && matchInvolvesInactivePlayer(m, partnerById)) {
-      continue;
-    }
     const li = document.createElement("li");
     const idxAttr = String(matchIndex);
     li.className = "history-item";
@@ -1189,7 +1048,7 @@ function renderHistory(matches, players, sess) {
 function rerenderHistoryOnly() {
   const sess = window.__session;
   if (!sess) return;
-  renderHistory([...sess.matches, ...roundMatches(sess)], sess.players, sess);
+  renderHistory([...sess.matches, ...roundMatches(sess)], sess.players);
 }
 
 $("#add-player").addEventListener("click", () => {
@@ -1534,16 +1393,6 @@ $("#copy-link").addEventListener("click", async () => {
 wireStandingsTabs();
 wireSessionSetupTabs();
 
-$("#session-setup-panel-config")?.addEventListener("change", (e) => {
-  const t = e.target;
-  if (
-    t?.id === "config-hide-inactive-standings" ||
-    t?.id === "config-hide-inactive-matches"
-  ) {
-    t.setAttribute("aria-checked", t.checked ? "true" : "false");
-  }
-});
-
 $("#form-session-config")?.addEventListener("submit", async (e) => {
   e.preventDefault();
   const sess = window.__session;
@@ -1558,18 +1407,10 @@ $("#form-session-config")?.addEventListener("submit", async (e) => {
     toast("k must be a number from 0 to 1000");
     return;
   }
-  const standingsIn = $("#config-hide-inactive-standings");
-  const matchesIn = $("#config-hide-inactive-matches");
   try {
     const updated = await api(`/api/sessions/${sess.id}/config`, {
       method: "PATCH",
-      body: JSON.stringify({
-        sit_out_score: sit,
-        hide_inactive_from_standings:
-          standingsIn?.checked ?? true,
-        hide_inactive_from_matches:
-          matchesIn?.checked ?? true,
-      }),
+      body: JSON.stringify({ sit_out_score: sit }),
     });
     refreshSessionView(updated);
     toast("Config saved");
