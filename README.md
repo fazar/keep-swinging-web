@@ -65,7 +65,7 @@ Environment variables (see `.env.example`):
 | `POST` | `/api/sessions/{id}/rounds/{round_id}/complete` | Finalize all scheduled court results; accepts optional `{"courts":[{"court_id":"...","score_a":6,"score_b":4}]}` for full-round entry |
 | `DELETE` | `/api/sessions/{id}/courts/{court_id}` | Remove a court; during an open round its slot is removed and any saved result discarded, then standings are recalculated |
 | `POST` | `/api/sessions/{id}/players` | Body: `{"name":"Ada"}` — add new player (**≤16** roster) **or**, if exactly one inactive player matches the name (**case-insensitive**), revive them (`inactive: false`); rejects duplicate active names |
-| `DELETE` | `/api/sessions/{id}/players/{player_id}` | Mark player **inactive** (**away from shuffle**); need **>4** shuffle-active afterwards; preserves history / standings IDs |
+| `DELETE` | `/api/sessions/{id}/players/{player_id}` | Mark player **inactive** (**away from shuffle**); need **>4** shuffle-active afterwards; preserves history / standings IDs. If they are still paired on a **pending** court of the open round, that round's pending courts are re-picked without them (completed results and unused courts untouched) |
 
 For split hosting later, enable CORS on the API (already `*` for simple cases).
 

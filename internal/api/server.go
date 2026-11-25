@@ -1136,6 +1136,89 @@ func applyAddSessionPlayer(sess *session.Session, name string) (bool, error) {
 	return false, nil
 }
 
+// applyRemoveSessionPlayer marks the player inactive (away). When the open
+// round still pairs them on a pending court, that round's pending courts are
+// re-picked without them so play can continue; completed results and unused
+// courts are left untouched. Legacy lineup re-picking stays with the caller.
+func applyRemoveSessionPlayer(sess *session.Session, pid string) error {
+	if _, ok := playerIndex(sess)[pid]; !ok {
+		return errors.New("unknown player id")
+	}
+	var minActive int
+	if sess.MatchFormat == session.MatchFormatSingles {
+		minActive = 2
+	} else {
+		minActive = 4
+	}
+	if shuffleActiveCount(sess.Players) <= minActive {
+		return fmt.Errorf("cannot remove players from shuffle: need at least %d active players", minActive)
+	}
+	for i := range sess.Players {
+		if sess.Players[i].ID == pid {
+			sess.Players[i].Inactive = true
+			break
+		}
+	}
+	reshufflePendingAfterRemoval(sess, pid)
+	return nil
+}
+
+// reshufflePendingAfterRemoval re-picks every pending court of the open round
+// when the removed player is still paired on one. Players who already
+// completed a court this round keep their result and are not re-picked;
+// resting players stay resting. Courts that can no longer be filled become
+// unused.
+func reshufflePendingAfterRemoval(sess *session.Session, pid string) {
+	round := sess.CurrentRound
+	if round == nil || round.Status != session.RoundStatusOpen {
+		return
+	}
+	removedInPending := false
+	for _, slot := range round.Slots {
+		if slot.Status != session.RoundSlotStatusPending {
+			continue
+		}
+		for _, p := range append(append([]session.Player(nil), slot.TeamA...), slot.TeamB...) {
+			if p.ID == pid {
+				removedInPending = true
+			}
+		}
+	}
+	if !removedInPending {
+		return
+	}
+	assigned := make([]string, 0, 4*len(round.Slots))
+	for _, slot := range round.Slots {
+		if slot.Status != session.RoundSlotStatusCompleted {
+			continue
+		}
+		for _, p := range slot.TeamA {
+			assigned = append(assigned, p.ID)
+		}
+		for _, p := range slot.TeamB {
+			assigned = append(assigned, p.ID)
+		}
+	}
+	matches := recordedMatches(sess)
+	resting := round.RestingPlayerIDs
+	for i := range round.Slots {
+		slot := &round.Slots[i]
+		if slot.Status != session.RoundSlotStatusPending {
+			continue
+		}
+		teamA, teamB, err := scheduler.PickCourtPlayers(sess.Players, matches, sess.ShufflingStyle, sess.MatchFormat, resting, assigned)
+		if err != nil {
+			slot.Status = session.RoundSlotStatusUnused
+			slot.TeamA, slot.TeamB = nil, nil
+			continue
+		}
+		slot.TeamA, slot.TeamB = teamA, teamB
+		for _, p := range append(append([]session.Player(nil), teamA...), teamB...) {
+			assigned = append(assigned, p.ID)
+		}
+	}
+}
+
 func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -1151,60 +1234,45 @@ func (s *Server) handleRemoveSessionPlayer(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		return
 	}
-	idx := playerIndex(sess)
-	target, ok := idx[pid]
-	if !ok {
-		writeError(w, http.StatusBadRequest, "unknown player id")
-		return
-	}
-	if target.Inactive {
+	if p, ok := playerIndex(sess)[pid]; ok && p.Inactive {
 		writeJSON(w, http.StatusOK, sess)
 		return
 	}
-
-	var minActive int
-	if sess.MatchFormat == session.MatchFormatSingles {
-		minActive = 2
-	} else {
-		minActive = 4
-	}
-	if shuffleActiveCount(sess.Players) <= minActive {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("cannot remove players from shuffle: need at least %d active players", minActive))
+	if err := applyRemoveSessionPlayer(sess, pid); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
-	for i := range sess.Players {
-		if sess.Players[i].ID == pid {
-			sess.Players[i].Inactive = true
-			break
+	// Round-model sessions were handled by applyRemoveSessionPlayer (open
+	// round pending courts re-picked, completed results kept). Legacy sessions
+	// have no round concept, so the suggested match is re-picked here.
+	if !session.UsesRoundModel(sess) {
+		var sug *session.SuggestedMatch
+		var key string
+		var errPick error
+		if sess.MatchFormat == session.MatchFormatSingles {
+			sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
+		} else {
+			sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
 		}
-	}
-
-	var sug *session.SuggestedMatch
-	var key string
-	var errPick error
-	if sess.MatchFormat == session.MatchFormatSingles {
-		sug, key, errPick = scheduler.PickSuggestionSingles(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
-	} else {
-		sug, key, errPick = scheduler.PickSuggestion(sess.Players, sess.Matches, sess.ShufflingStyle, "", nil)
-	}
-	if errPick != nil {
-		for i := range sess.Players {
-			if sess.Players[i].ID == pid {
-				sess.Players[i].Inactive = false
-				break
+		if errPick != nil {
+			for i := range sess.Players {
+				if sess.Players[i].ID == pid {
+					sess.Players[i].Inactive = false
+					break
+				}
 			}
-		}
-		if errors.Is(errPick, scheduler.ErrNoSinglesLineup) {
-			writeError(w, http.StatusBadRequest, "cannot remove player: lineup would drop below two active players")
+			if errors.Is(errPick, scheduler.ErrNoSinglesLineup) {
+				writeError(w, http.StatusBadRequest, "cannot remove player: lineup would drop below two active players")
+				return
+			}
+			s.Logger.Error("pick suggestion after remove shuffle player", "err", errPick)
+			writeError(w, http.StatusInternalServerError, "could not refresh lineup")
 			return
 		}
-		s.Logger.Error("pick suggestion after remove shuffle player", "err", errPick)
-		writeError(w, http.StatusInternalServerError, "could not refresh lineup")
-		return
+		sess.Suggested = sug
+		sess.SuggestionKey = key
 	}
-	sess.Suggested = sug
-	sess.SuggestionKey = key
 	refreshNextRoundPreview(sess)
 	if err := s.Store.Save(ctx, sess); err != nil {
 		s.Logger.Error("save session", "err", err)

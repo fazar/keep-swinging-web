@@ -1,6 +1,7 @@
 package api
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -92,6 +93,142 @@ func TestAddPlayerAllowedAfterCompletedCourt(t *testing.T) {
 	}
 	if sess.CurrentRound.Slots[0].Status != session.RoundSlotStatusCompleted {
 		t.Fatal("completed court was touched")
+	}
+}
+
+func roundPlayers(r *session.Round) []string {
+	var out []string
+	for _, slot := range r.Slots {
+		for _, p := range append(append([]session.Player(nil), slot.TeamA...), slot.TeamB...) {
+			out = append(out, p.ID)
+		}
+	}
+	return out
+}
+
+func completeSlot(t *testing.T, slot *session.RoundSlot) {
+	t.Helper()
+	score := 11
+	slot.Status = session.RoundSlotStatusCompleted
+	slot.ScoreA = &score
+	slot.ScoreB = &score
+}
+
+func TestRemovePlayerReshufflesPendingCourt(t *testing.T) {
+	sess := newRoundTestSession()
+	round, _, err := scheduler.PickRound(sess.Players, nil, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.CurrentRound = round
+
+	victim := round.Slots[0].TeamA[0].ID
+	if err := applyRemoveSessionPlayer(sess, victim); err != nil {
+		t.Fatal(err)
+	}
+
+	slot := sess.CurrentRound.Slots[0]
+	if slot.Status != session.RoundSlotStatusPending {
+		t.Fatalf("expected re-picked pending court, got %v", slot.Status)
+	}
+	playing := append(append([]session.Player(nil), slot.TeamA...), slot.TeamB...)
+	if len(playing) != 4 {
+		t.Fatalf("expected 4 players on re-picked court, got %d", len(playing))
+	}
+	for _, p := range playing {
+		if p.ID == victim {
+			t.Fatal("removed player is still paired in the pending court")
+		}
+		if p.Inactive {
+			t.Fatal("inactive player scheduled on a court")
+		}
+	}
+}
+
+func TestRemovePlayerKeepsCompletedCourtAndReplacesPending(t *testing.T) {
+	sess := newRoundTestSession()
+	sess.Players = append(sess.Players, session.Player{ID: "g", Name: "G"}, session.Player{ID: "h", Name: "H"}, session.Player{ID: "i", Name: "I"})
+	sess.Courts = append(sess.Courts, session.Court{ID: "court-2", Name: "Court 2"})
+	round, _, err := scheduler.PickRound(sess.Players, nil, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.CurrentRound = round
+	completeSlot(t, &sess.CurrentRound.Slots[0])
+	completedBefore := roundSlotIDs(&session.Round{Slots: []session.RoundSlot{sess.CurrentRound.Slots[0]}})
+
+	victim := sess.CurrentRound.Slots[1].TeamA[0].ID
+	if err := applyRemoveSessionPlayer(sess, victim); err != nil {
+		t.Fatal(err)
+	}
+
+	done := sess.CurrentRound.Slots[0]
+	if got := roundSlotIDs(&session.Round{Slots: []session.RoundSlot{done}}); got != completedBefore {
+		t.Fatalf("completed court changed: %s -> %s", completedBefore, got)
+	}
+	if done.Status != session.RoundSlotStatusCompleted || done.ScoreA == nil || done.ScoreB == nil {
+		t.Fatal("completed court lost its result")
+	}
+	slot := sess.CurrentRound.Slots[1]
+	playing := append(append([]session.Player(nil), slot.TeamA...), slot.TeamB...)
+	for _, p := range playing {
+		if p.ID == victim {
+			t.Fatal("removed player is still paired in the pending court")
+		}
+	}
+}
+
+func TestRemovePlayerLeavesCourtUnusedWhenPoolTooSmall(t *testing.T) {
+	sess := newRoundTestSession()
+	sess.Players = append(sess.Players, session.Player{ID: "g", Name: "G"}, session.Player{ID: "h", Name: "H"})
+	sess.Courts = append(sess.Courts, session.Court{ID: "court-2", Name: "Court 2"})
+	round, _, err := scheduler.PickRound(sess.Players, nil, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.CurrentRound = round
+	completeSlot(t, &sess.CurrentRound.Slots[0])
+
+	victim := sess.CurrentRound.Slots[1].TeamA[0].ID
+	if err := applyRemoveSessionPlayer(sess, victim); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := sess.CurrentRound.Slots[1].Status; got != session.RoundSlotStatusUnused {
+		t.Fatalf("expected court 2 to become unused, got %v", got)
+	}
+	if ids := roundPlayers(sess.CurrentRound); slices.Contains(ids, victim) {
+		t.Fatal("removed player still scheduled")
+	}
+}
+
+func TestRemoveRestingPlayerKeepsPendingPairings(t *testing.T) {
+	sess := newRoundTestSession()
+	round, _, err := scheduler.PickRound(sess.Players, nil, sess.ShufflingStyle, sess.Courts, sess.MatchFormat, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess.CurrentRound = round
+	assigned := map[string]bool{}
+	for _, p := range roundPlayers(round) {
+		assigned[p] = true
+	}
+	var resting string
+	for _, p := range sess.Players {
+		if !assigned[p.ID] {
+			resting = p.ID
+			break
+		}
+	}
+	sess.CurrentRound.RestingPlayerIDs = []string{resting}
+	before := roundSlotIDs(sess.CurrentRound)
+
+	if err := applyRemoveSessionPlayer(sess, resting); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := roundSlotIDs(sess.CurrentRound); got != before {
+		t.Fatalf("pending pairings changed for a resting removal: %s -> %s", before, got)
 	}
 }
 
